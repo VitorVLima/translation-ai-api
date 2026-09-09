@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: english-ai
+
+  datasource:
+    url: jdbc:postgresql://localhost:5434/mydatabase
+    username: myuser
+    password: secret
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080

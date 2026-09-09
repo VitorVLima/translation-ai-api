@@ -1,0 +1,39 @@
+package com.example.com.englishai.backend.presentation.rest.auth;
+
+import com.example.com.englishai.backend.application.authentication.RegisterUser;
+import com.example.com.englishai.backend.domain.user.User;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.RegisterRequest;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.UserResponse;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/v1/auth")
+public class AuthController {
+
+    private final RegisterUser registerUser;
+
+    public AuthController(RegisterUser registerUser) {
+        this.registerUser = registerUser;
+    }
+
+    @PostMapping("/register")
+    public ResponseEntity<UserResponse> register(
+            @Valid @RequestBody RegisterRequest request
+    ) {
+
+        User user = registerUser.execute(
+                request.email(),
+                request.username(),
+                request.password()
+        );
+
+        UserResponse response = UserResponse.from(user);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(response);
+    }
+}
