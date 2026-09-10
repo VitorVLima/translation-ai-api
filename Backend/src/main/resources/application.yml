@@ -30,3 +30,6 @@ security:
     # Base64-encoded random key containing at least 32 bytes. No default secret.
     secret: ${JWT_SECRET}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
+  refresh-token:
+    # Base64-encoded random key containing at least 32 bytes. Required to issue refresh tokens.
+    hash-secret: ${SECURITY_REFRESH_TOKEN_HASH_SECRET}

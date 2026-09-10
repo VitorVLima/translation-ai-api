@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.presentation.rest.exception;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidRefreshTokenException;
 import com.example.com.englishai.backend.application.user.exception.CurrentUserNotFoundException;
 import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
@@ -38,6 +39,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse(exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("Invalid refresh token"));
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)

@@ -1,10 +1,15 @@
 package com.example.com.englishai.backend.presentation.rest.auth;
 
 import com.example.com.englishai.backend.application.authentication.LoginUser;
+import com.example.com.englishai.backend.application.authentication.RefreshAccessToken;
+import com.example.com.englishai.backend.application.authentication.LogoutSession;
+import com.example.com.englishai.backend.application.authentication.RefreshAccessTokenResult;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
 import com.example.com.englishai.backend.application.authentication.LoginResult;
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidRefreshTokenException;
+import com.example.com.englishai.backend.application.authentication.exception.RefreshTokenReuseException;
 import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
 import com.example.com.englishai.backend.domain.user.User;
 import com.example.com.englishai.backend.infrastructure.security.SecurityConfig;
@@ -39,6 +44,12 @@ class AuthControllerLoginTest {
     private LoginUser loginUser;
 
     @MockitoBean
+    private RefreshAccessToken refreshAccessToken;
+
+    @MockitoBean
+    private LogoutSession logoutSession;
+
+    @MockitoBean
     private RegisterUser registerUser;
 
     @MockitoBean
@@ -55,7 +66,7 @@ class AuthControllerLoginTest {
         OffsetDateTime now = OffsetDateTime.parse("2026-09-09T12:00:00Z");
         User user = new User(id, "user@test.com", "test-user", "stored-hash", now, now);
         when(loginUser.execute("user@test.com", "correct-password"))
-                .thenReturn(new LoginResult(user, "test-access-token"));
+                .thenReturn(new LoginResult(user, "test-access-token", "test-refresh-token"));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -63,6 +74,8 @@ class AuthControllerLoginTest {
                                 {"email":"user@test.com","password":"correct-password"}
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.user.id").value(id.toString()))
                 .andExpect(jsonPath("$.user.email").value("user@test.com"))
@@ -70,11 +83,18 @@ class AuthControllerLoginTest {
                 .andExpect(jsonPath("$.user.createdAt").value("2026-09-09T12:00:00Z"))
                 .andExpect(jsonPath("$.user.length()").value(4))
                 .andExpect(jsonPath("$.accessToken").value("test-access-token"))
-                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.refreshToken").value("test-refresh-token"))
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
                 .andExpect(jsonPath("$.user.password").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
-                .andExpect(jsonPath("$.password").doesNotExist());
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.tokenHash").doesNotExist())
+                .andExpect(jsonPath("$.familyId").doesNotExist())
+                .andExpect(jsonPath("$.revokedAt").doesNotExist())
+                .andExpect(jsonPath("$.replacedById").doesNotExist());
 
         verify(loginUser).execute("user@test.com", "correct-password");
         verifyNoInteractions(registerUser);
@@ -112,6 +132,8 @@ class AuthControllerLoginTest {
                                 {"email":"user@test.com","password":"correct-password"}
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
                 .andExpect(unauthenticated())
                 .andExpect(cookie().doesNotExist("JSESSIONID"))
                 .andExpect(result -> assertThat(result.getRequest().getSession(false)).isNull());
@@ -152,6 +174,109 @@ class AuthControllerLoginTest {
                         {"message":"Invalid credentials"}
                         """))
                 .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
+    void shouldAllowAnonymousRefreshAndReturnTokenPair() throws Exception {
+        when(refreshAccessToken.execute("current-refresh-token"))
+                .thenReturn(new RefreshAccessTokenResult("new-access-token", "new-refresh-token"));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"current-refresh-token\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.accessToken").value("new-access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("new-refresh-token"))
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.tokenHash").doesNotExist())
+                .andExpect(jsonPath("$.familyId").doesNotExist())
+                .andExpect(jsonPath("$.replacedById").doesNotExist());
+
+        verify(refreshAccessToken).execute("current-refresh-token");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   "})
+    void shouldRejectBlankRefreshToken(String token) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + token + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.refreshToken").value("Refresh token is required"));
+
+        verifyNoInteractions(refreshAccessToken);
+    }
+
+    @Test
+    void shouldRejectRefreshRequestWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.refreshToken").value("Refresh token is required"));
+
+        verifyNoInteractions(refreshAccessToken);
+    }
+
+    @ParameterizedTest
+    @ValueSource(classes = {InvalidRefreshTokenException.class, RefreshTokenReuseException.class})
+    void shouldReturnGenericUnauthorizedForInvalidRefreshTokens(
+            Class<? extends RuntimeException> exceptionType
+    ) throws Exception {
+        RuntimeException exception = exceptionType == RefreshTokenReuseException.class
+                ? new RefreshTokenReuseException()
+                : new InvalidRefreshTokenException();
+        when(refreshAccessToken.execute("invalid-refresh-token")).thenThrow(exception);
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"invalid-refresh-token\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json("{\"message\":\"Invalid refresh token\"}"))
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
+    void shouldKeepRefreshGetProtected() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(unauthenticated());
+    }
+
+    @Test
+    void shouldAllowAnonymousLogoutAndReturnNoContent() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"session-token\"}"))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
+                .andExpect(content().string(""));
+
+        verify(logoutSession).execute("session-token");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   "})
+    void shouldRejectBlankLogoutToken(String token) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + token + "\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(logoutSession);
+    }
+
+    @Test
+    void shouldKeepLogoutGetProtected() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/logout"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(unauthenticated());
     }
 
     @Test
