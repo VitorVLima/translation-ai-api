@@ -1,6 +1,10 @@
 package com.example.com.englishai.backend.presentation.rest.auth;
 
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
+import com.example.com.englishai.backend.application.authentication.LoginUser;
+import com.example.com.englishai.backend.application.authentication.LoginResult;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginResponse;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginRequest;
 import com.example.com.englishai.backend.domain.user.User;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.RegisterRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.UserResponse;
@@ -14,9 +18,19 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final RegisterUser registerUser;
+    private final LoginUser loginUser;
 
-    public AuthController(RegisterUser registerUser) {
+    public AuthController(RegisterUser registerUser, LoginUser loginUser) {
         this.registerUser = registerUser;
+        this.loginUser = loginUser;
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request
+    ) {
+        LoginResult result = loginUser.execute(request.email(), request.password());
+        return ResponseEntity.ok(LoginResponse.from(result));
     }
 
     @PostMapping("/register")

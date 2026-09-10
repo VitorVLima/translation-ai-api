@@ -1,0 +1,207 @@
+package com.example.com.englishai.backend.presentation.rest.auth;
+
+import com.example.com.englishai.backend.application.authentication.LoginUser;
+import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.authentication.LoginResult;
+import com.example.com.englishai.backend.application.authentication.RegisterUser;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
+import com.example.com.englishai.backend.domain.user.User;
+import com.example.com.englishai.backend.infrastructure.security.SecurityConfig;
+import com.example.com.englishai.backend.presentation.rest.exception.GlobalExceptionHandler;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.OffsetDateTime;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.unauthenticated;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(AuthController.class)
+@Import({SecurityConfig.class, GlobalExceptionHandler.class})
+class AuthControllerLoginTest {
+
+    private final MockMvc mockMvc;
+
+    @MockitoBean
+    private LoginUser loginUser;
+
+    @MockitoBean
+    private RegisterUser registerUser;
+
+    @MockitoBean
+    private AuthenticationTokenValidator tokenValidator;
+
+    @Autowired
+    AuthControllerLoginTest(MockMvc mockMvc) {
+        this.mockMvc = mockMvc;
+    }
+
+    @Test
+    void shouldAllowAnonymousLoginAndReturnPublicUserDataAndAccessToken() throws Exception {
+        UUID id = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-09T12:00:00Z");
+        User user = new User(id, "user@test.com", "test-user", "stored-hash", now, now);
+        when(loginUser.execute("user@test.com", "correct-password"))
+                .thenReturn(new LoginResult(user, "test-access-token"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"user@test.com","password":"correct-password"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.user.id").value(id.toString()))
+                .andExpect(jsonPath("$.user.email").value("user@test.com"))
+                .andExpect(jsonPath("$.user.username").value("test-user"))
+                .andExpect(jsonPath("$.user.createdAt").value("2026-09-09T12:00:00Z"))
+                .andExpect(jsonPath("$.user.length()").value(4))
+                .andExpect(jsonPath("$.accessToken").value("test-access-token"))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.user.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist());
+
+        verify(loginUser).execute("user@test.com", "correct-password");
+        verifyNoInteractions(registerUser);
+    }
+
+    @Test
+    void shouldRejectMissingBodyBeforeCallingUseCase() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(loginUser, registerUser);
+    }
+
+    @Test
+    void shouldRejectMalformedJsonBeforeCallingUseCase() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(loginUser, registerUser);
+    }
+
+    @Test
+    void shouldNotCreateSessionOrAuthenticateSubsequentRequestAfterLogin() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now();
+        User user = new User(UUID.randomUUID(), "user@test.com", "test-user", "stored-hash", now, now);
+        when(loginUser.execute("user@test.com", "correct-password"))
+                .thenReturn(new LoginResult(user, "test-access-token"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"user@test.com","password":"correct-password"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(unauthenticated())
+                .andExpect(cookie().doesNotExist("JSESSIONID"))
+                .andExpect(result -> assertThat(result.getRequest().getSession(false)).isNull());
+
+        // GET is protected: only POST is public on this path.
+        mockMvc.perform(get("/api/v1/auth/login"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(unauthenticated())
+                .andExpect(result -> assertThat(result.getRequest().getSession(false)).isNull());
+
+        verify(loginUser).execute("user@test.com", "correct-password");
+        verifyNoMoreInteractions(loginUser);
+        verifyNoInteractions(registerUser);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/auth/register", "/api/v1/auth/login"})
+    void shouldNotPermitAnonymousGetOnAuthPaths(String path) throws Exception {
+        mockMvc.perform(get(path))
+                .andExpect(status().isUnauthorized())
+                .andExpect(unauthenticated());
+
+        verifyNoInteractions(loginUser, registerUser);
+    }
+
+    @Test
+    void shouldReturnUnauthorizedForInvalidCredentials() throws Exception {
+        when(loginUser.execute("user@test.com", "wrong-password"))
+                .thenThrow(new InvalidCredentialsException());
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"user@test.com","password":"wrong-password"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json("""
+                        {"message":"Invalid credentials"}
+                        """))
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
+    void shouldReturnConflictWhenRegistrationPersistenceDetectsDuplicate() throws Exception {
+        when(registerUser.execute("user@test.com", "test-user", "password123"))
+                .thenThrow(new UserAlreadyExistsException());
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"user@test.com","username":"test-user","password":"password123"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("""
+                        {"message":"User already exists"}
+                        """))
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"email\":\"\",\"password\":\"some-password\"}",
+            "{\"email\":\"invalid-email\",\"password\":\"some-password\"}",
+            "{\"password\":\"some-password\"}"
+    })
+    void shouldRejectInvalidEmailBeforeCallingUseCase(String body) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.email").exists());
+
+        verifyNoInteractions(loginUser, registerUser);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"email\":\"user@test.com\",\"password\":\"\"}",
+            "{\"email\":\"user@test.com\",\"password\":\"   \"}",
+            "{\"email\":\"user@test.com\"}"
+    })
+    void shouldRejectMissingOrBlankPasswordBeforeCallingUseCase(String body) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.password").value("Password is required"));
+
+        verifyNoInteractions(loginUser, registerUser);
+    }
+}

@@ -12,6 +12,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.Mockito.*;
 
 class RegisterUserTest {
@@ -48,7 +49,8 @@ class RegisterUserTest {
                 OffsetDateTime.now()
         );
 
-        when(userRepository.save(any(User.class)))
+        ArgumentCaptor<User> savedUserCaptor = ArgumentCaptor.forClass(User.class);
+        when(userRepository.save(savedUserCaptor.capture()))
                 .thenReturn(user);
 
         User result = registerUser.execute(
@@ -57,13 +59,16 @@ class RegisterUserTest {
                 rawPassword
         );
 
-        assertThat(result.getPasswordHash())
-                .isEqualTo(passwordHash);
+        User savedUser = savedUserCaptor.getValue();
+        assertThat(savedUser.getEmail()).isEqualTo(email);
+        assertThat(savedUser.getUsername()).isEqualTo(username);
+        assertThat(savedUser.getPasswordHash()).isEqualTo(passwordHash);
+        assertThat(savedUser.getPasswordHash()).isNotEqualTo(rawPassword);
+        assertThat(result.getPasswordHash()).isEqualTo(passwordHash);
 
         verify(passwordEncoder)
                 .encode(rawPassword);
 
-        verify(userRepository)
-                .save(any(User.class));
+        verify(userRepository).save(savedUser);
     }
 }
