@@ -1,0 +1,2 @@
+package com.example.com.englishai.backend.infrastructure.security; import com.example.com.englishai.backend.application.ports.PasswordResetCodeGenerator; import java.security.SecureRandom;
+public class SecurePasswordResetCodeGenerator implements PasswordResetCodeGenerator { private final SecureRandom random=new SecureRandom(); public String generate(){return "%06d".formatted(random.nextInt(1_000_000));} }

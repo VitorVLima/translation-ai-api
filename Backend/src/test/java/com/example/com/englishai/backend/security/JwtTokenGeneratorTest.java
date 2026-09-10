@@ -42,7 +42,9 @@ class JwtTokenGeneratorTest {
         assertThat(token.getJWTClaimsSet().getIssueTime().toInstant()).isEqualTo(now);
         assertThat(token.getJWTClaimsSet().getExpirationTime().toInstant()).isEqualTo(now.plusSeconds(900));
         assertThat(token.getJWTClaimsSet().getStringClaim("token_type")).isEqualTo("access");
-        assertThat(token.getJWTClaimsSet().getClaims()).containsOnlyKeys("sub", "token_type", "iat", "exp");
+        assertThat(token.getJWTClaimsSet().getIssuer()).isEqualTo("englishai");
+        assertThat(token.getJWTClaimsSet().getAudience()).containsExactly("englishai-api");
+        assertThat(token.getJWTClaimsSet().getClaims()).containsOnlyKeys("sub", "iss", "aud", "token_type", "iat", "exp");
     }
 
     @Test

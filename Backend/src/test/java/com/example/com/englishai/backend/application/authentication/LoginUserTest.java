@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.application.authentication;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.authentication.exception.EmailVerificationRequiredException;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenGenerator;
 import com.example.com.englishai.backend.application.ports.PasswordEncoder;
 import com.example.com.englishai.backend.application.ports.RefreshTokenGenerator;
@@ -92,6 +93,7 @@ class LoginUserTest {
         assertThat(family.getExpiresAt()).isEqualTo(OffsetDateTime.ofInstant(NOW.plus(Duration.ofDays(30)), ZoneOffset.UTC));
         assertThat(family.getRevokedAt()).isNull();
         verify(refreshTokenTransaction).execute(any());
+        verify(passwordEncoder, never()).matchesDummy(anyString());
     }
 
     @Test
@@ -117,12 +119,34 @@ class LoginUserTest {
     }
 
     @Test
+    void shouldCapInitialTokenAtFamilyAbsoluteExpiration() {
+        User user = createUser();
+        when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(anyString(), eq(user.getPasswordHash()))).thenReturn(true);
+        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(refreshTokenGenerator.generate()).thenReturn("raw");
+        when(refreshTokenHasher.hash("raw")).thenReturn("hash");
+
+        LoginUser capped = new LoginUser(userRepository, passwordEncoder, accessTokenGenerator,
+                refreshTokenGenerator, refreshTokenHasher, refreshTokenFamilyRepository,
+                refreshTokenTransaction, Duration.ofDays(40), Duration.ofDays(30), CLOCK);
+        capped.execute(user.getEmail(), "password");
+
+        ArgumentCaptor<RefreshTokenFamily> familyCaptor = ArgumentCaptor.forClass(RefreshTokenFamily.class);
+        verify(refreshTokenFamilyRepository).save(familyCaptor.capture());
+        ArgumentCaptor<RefreshToken> tokenCaptor = ArgumentCaptor.forClass(RefreshToken.class);
+        verify(refreshTokenRepository).save(tokenCaptor.capture());
+        assertThat(tokenCaptor.getValue().getExpiresAt()).isEqualTo(familyCaptor.getValue().getExpiresAt());
+    }
+
+    @Test
     void shouldNotIssueRefreshTokenForUnknownEmail() {
         when(userRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> loginUser.execute("unknown@test.com", "some-password"))
                 .isInstanceOf(InvalidCredentialsException.class);
-        verifyNoInteractions(passwordEncoder, accessTokenGenerator, refreshTokenGenerator,
+        verify(passwordEncoder).matchesDummy("some-password");
+        verifyNoInteractions(accessTokenGenerator, refreshTokenGenerator,
                 refreshTokenHasher, refreshTokenTransaction, refreshTokenRepository, refreshTokenFamilyRepository);
     }
 
@@ -134,6 +158,7 @@ class LoginUserTest {
 
         assertThatThrownBy(() -> loginUser.execute(user.getEmail(), "wrong-password"))
                 .isInstanceOf(InvalidCredentialsException.class);
+        verify(passwordEncoder, never()).matchesDummy(anyString());
         verifyNoInteractions(accessTokenGenerator, refreshTokenGenerator, refreshTokenHasher,
                 refreshTokenTransaction, refreshTokenRepository, refreshTokenFamilyRepository);
     }
@@ -153,6 +178,33 @@ class LoginUserTest {
 
         verify(refreshTokenFamilyRepository).save(any(RefreshTokenFamily.class));
         verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    void shouldRejectCorrectPasswordWhenEmailIsNotVerifiedWithoutIssuingAnything() {
+        User user = new User(UUID.randomUUID(), "unverified@test.com", "unverified", "stored-password-hash",
+                OffsetDateTime.now(), OffsetDateTime.now(), false);
+        when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password", user.getPasswordHash())).thenReturn(true);
+
+        assertThatThrownBy(() -> loginUser.execute(user.getEmail(), "password"))
+                .isExactlyInstanceOf(EmailVerificationRequiredException.class);
+        verify(passwordEncoder).matches("password", user.getPasswordHash());
+        verifyNoInteractions(accessTokenGenerator, refreshTokenGenerator, refreshTokenHasher,
+                refreshTokenTransaction, refreshTokenRepository, refreshTokenFamilyRepository);
+    }
+
+    @Test
+    void shouldKeepInvalidCredentialsForWrongPasswordOnUnverifiedAccount() {
+        User user = new User(UUID.randomUUID(), "unverified@test.com", "unverified", "stored-password-hash",
+                OffsetDateTime.now(), OffsetDateTime.now(), false);
+        when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong", user.getPasswordHash())).thenReturn(false);
+
+        assertThatThrownBy(() -> loginUser.execute(user.getEmail(), "wrong"))
+                .isExactlyInstanceOf(InvalidCredentialsException.class);
+        verifyNoInteractions(accessTokenGenerator, refreshTokenGenerator, refreshTokenHasher,
+                refreshTokenTransaction, refreshTokenRepository, refreshTokenFamilyRepository);
     }
 
     @Test

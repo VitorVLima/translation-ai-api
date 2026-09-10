@@ -7,6 +7,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class BCryptPasswordEncoderAdapter implements PasswordEncoder {
 
+    private static final String DUMMY_HASH =
+            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     private final BCryptPasswordEncoder encoder;
 
     public BCryptPasswordEncoderAdapter() {
@@ -21,5 +24,10 @@ public class BCryptPasswordEncoderAdapter implements PasswordEncoder {
     @Override
     public boolean matches(String rawPassword, String encodedPassword) {
         return encoder.matches(rawPassword, encodedPassword);
+    }
+
+    @Override
+    public boolean matchesDummy(String rawPassword) {
+        return encoder.matches(rawPassword, DUMMY_HASH);
     }
 }

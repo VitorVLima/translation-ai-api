@@ -132,7 +132,7 @@ public class RefreshAccessToken {
                 current.getUserId(),
                 current.getFamilyId(),
                 newTokenHash,
-                now.plus(refreshTokenExpiration),
+                min(now.plus(refreshTokenExpiration), family.getExpiresAt()),
                 now,
                 null,
                 null
@@ -141,6 +141,10 @@ public class RefreshAccessToken {
         repository.persistRotation(rotatedCurrent, replacement);
         String accessToken = authenticationTokenGenerator.generate(current.getUserId());
         return RotationOutcome.rotated(new RefreshAccessTokenResult(accessToken, newRawToken));
+    }
+
+    private static OffsetDateTime min(OffsetDateTime first, OffsetDateTime second) {
+        return first.isBefore(second) ? first : second;
     }
 
     private record RotationOutcome(RefreshAccessTokenResult result, boolean reuseDetected) {

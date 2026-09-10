@@ -18,4 +18,6 @@ public interface RefreshTokenFamilyRepository {
     void revoke(UUID id, OffsetDateTime revokedAt);
 
     void revoke(UUID id, OffsetDateTime revokedAt, RefreshTokenFamilyRevocationReason reason);
+
+    void revokeAllByUserId(UUID userId, OffsetDateTime revokedAt, RefreshTokenFamilyRevocationReason reason);
 }

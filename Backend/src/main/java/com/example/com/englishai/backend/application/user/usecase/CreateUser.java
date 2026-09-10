@@ -36,7 +36,8 @@ public class CreateUser {
                 username,
                 passwordHash,
                 now,
-                now
+                now,
+                false
         );
 
         return userRepository.save(user);

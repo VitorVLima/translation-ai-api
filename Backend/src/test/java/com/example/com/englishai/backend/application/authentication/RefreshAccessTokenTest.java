@@ -209,6 +209,29 @@ class RefreshAccessTokenTest {
         verify(accessTokenGenerator).generate(userId);
     }
 
+    @Test
+    void shouldCapReplacementAtFamilyExpirationWithoutChangingFamily() {
+        UUID userId = UUID.randomUUID();
+        UUID familyId = UUID.randomUUID();
+        RefreshToken current = token(userId, familyId, NOW.plusSeconds(120), null, null, "old-hash");
+        RefreshTokenFamily family = new RefreshTokenFamily(familyId, userId, at(NOW.minusSeconds(60)),
+                at(NOW.plusSeconds(30)), null);
+        when(hasher.hash("old")).thenReturn("old-hash");
+        when(hasher.hash("new")).thenReturn("new-hash");
+        when(repository.findByTokenHash("old-hash")).thenReturn(Optional.of(current));
+        when(repository.findByTokenHashForUpdate("old-hash")).thenReturn(Optional.of(current));
+        when(familyRepository.findByIdForUpdate(familyId)).thenReturn(Optional.of(family));
+        when(tokenGenerator.generate()).thenReturn("new");
+        when(accessTokenGenerator.generate(userId)).thenReturn("access");
+
+        useCase.execute("old");
+
+        ArgumentCaptor<RefreshToken> replacement = ArgumentCaptor.forClass(RefreshToken.class);
+        verify(repository).persistRotation(any(), replacement.capture());
+        assertThat(replacement.getValue().getExpiresAt()).isEqualTo(family.getExpiresAt());
+        assertThat(family.getExpiresAt()).isEqualTo(at(NOW.plusSeconds(30)));
+    }
+
     private RefreshToken token(
             UUID userId,
             UUID familyId,

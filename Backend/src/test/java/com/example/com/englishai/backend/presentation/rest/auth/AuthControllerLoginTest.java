@@ -7,6 +7,8 @@ import com.example.com.englishai.backend.application.authentication.RefreshAcces
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
 import com.example.com.englishai.backend.application.authentication.LoginResult;
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
+import com.example.com.englishai.backend.application.authentication.VerifyEmailCode;
+import com.example.com.englishai.backend.application.authentication.ResetPassword;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidRefreshTokenException;
 import com.example.com.englishai.backend.application.authentication.exception.RefreshTokenReuseException;
@@ -50,7 +52,13 @@ class AuthControllerLoginTest {
     private LogoutSession logoutSession;
 
     @MockitoBean
+    private ResetPassword resetPassword;
+
+    @MockitoBean
     private RegisterUser registerUser;
+
+    @MockitoBean
+    private VerifyEmailCode verifyEmailCode;
 
     @MockitoBean
     private AuthenticationTokenValidator tokenValidator;
@@ -280,6 +288,31 @@ class AuthControllerLoginTest {
     }
 
     @Test
+    void shouldAllowAnonymousPasswordResetAndReturnNoContent() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"482731\",\"newPassword\":\"NewPass123\"}"))
+                .andExpect(status().isNoContent());
+        verify(resetPassword).execute("user@test.com", "482731", "NewPass123");
+    }
+
+    @Test
+    void shouldRejectInvalidPasswordResetCodeFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"42\",\"newPassword\":\"NewPass123\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(resetPassword);
+    }
+
+    @Test
+    void shouldKeepPasswordResetGetProtected() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/reset-password"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(unauthenticated());
+    }
+
+    @Test
     void shouldReturnConflictWhenRegistrationPersistenceDetectsDuplicate() throws Exception {
         when(registerUser.execute("user@test.com", "test-user", "password123"))
                 .thenThrow(new UserAlreadyExistsException());
@@ -328,5 +361,39 @@ class AuthControllerLoginTest {
                 .andExpect(jsonPath("$.errors.password").value("Password is required"));
 
         verifyNoInteractions(loginUser, registerUser);
+    }
+
+    @Test
+    void shouldVerifyEmailAndReturnNoContent() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"000042\"}"))
+                .andExpect(status().isNoContent());
+        verify(verifyEmailCode).execute("user@test.com", "000042");
+    }
+
+    @Test
+    void shouldRejectInvalidVerificationCodeFormat() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"42\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.code").value("Code must contain exactly 6 digits"));
+        verifyNoInteractions(verifyEmailCode);
+    }
+
+    @Test
+    void shouldReturnForbiddenWhenEmailVerificationIsRequired() throws Exception {
+        when(loginUser.execute("pending@test.com", "password"))
+                .thenThrow(new com.example.com.englishai.backend.application.authentication.exception.EmailVerificationRequiredException());
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"pending@test.com\",\"password\":\"password\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Email verification required"))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
     }
 }

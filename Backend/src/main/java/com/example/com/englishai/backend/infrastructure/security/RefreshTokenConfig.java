@@ -26,12 +26,22 @@ public class RefreshTokenConfig {
 
     @Bean
     public Duration refreshTokenExpiration(
-            @Value("${SECURITY_REFRESH_TOKEN_EXPIRATION_SECONDS:2592000}") long expirationSeconds
+            @Value("${security.refresh-token.expiration-seconds:604800}") long expirationSeconds
     ) {
         if (expirationSeconds < 1) {
             throw new IllegalArgumentException("Refresh token expiration must be positive");
         }
         return Duration.ofSeconds(expirationSeconds);
+    }
+
+    @Bean
+    public Duration refreshTokenFamilyMaxLifetime(
+            @Value("${security.refresh-token.family-max-lifetime-seconds:2592000}") long lifetimeSeconds
+    ) {
+        if (lifetimeSeconds <= 0) {
+            throw new IllegalArgumentException("Refresh token family lifetime must be positive");
+        }
+        return Duration.ofSeconds(lifetimeSeconds);
     }
 
     @Bean
@@ -42,7 +52,7 @@ public class RefreshTokenConfig {
             AuthenticationTokenGenerator accessTokenGenerator,
             RefreshTokenFamilyRepository familyRepository,
             RefreshTokenTransaction transaction,
-            Duration expiration,
+            @org.springframework.beans.factory.annotation.Qualifier("refreshTokenExpiration") Duration expiration,
             Clock clock
     ) {
         return new RefreshAccessToken(

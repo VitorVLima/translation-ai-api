@@ -22,6 +22,16 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+      mail.smtp.starttls.required: ${MAIL_SMTP_STARTTLS_REQUIRED:true}
+
 server:
   port: ${SERVER_PORT:8080}
 
@@ -30,6 +40,11 @@ security:
     # Base64-encoded random key containing at least 32 bytes. No default secret.
     secret: ${JWT_SECRET}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
+    clock-skew-seconds: ${SECURITY_JWT_CLOCK_SKEW_SECONDS:60}
+    issuer: ${SECURITY_JWT_ISSUER:englishai}
+    audience: ${SECURITY_JWT_AUDIENCE:englishai-api}
   refresh-token:
     # Base64-encoded random key containing at least 32 bytes. Required to issue refresh tokens.
     hash-secret: ${SECURITY_REFRESH_TOKEN_HASH_SECRET}
+    expiration-seconds: ${SECURITY_REFRESH_TOKEN_EXPIRATION_SECONDS:604800}
+    family-max-lifetime-seconds: ${SECURITY_REFRESH_TOKEN_FAMILY_MAX_LIFETIME_SECONDS:2592000}

@@ -7,4 +7,9 @@ public record LoginResponse(UserResponse user, String accessToken, String refres
     public static LoginResponse from(LoginResult result) {
         return new LoginResponse(UserResponse.from(result.user()), result.accessToken(), result.refreshToken());
     }
+
+    @Override
+    public String toString() {
+        return "LoginResponse[user=" + user + ", accessToken=[REDACTED], refreshToken=[REDACTED]]";
+    }
 }

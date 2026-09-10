@@ -30,6 +30,9 @@ public class UserEntity {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified;
+
     protected UserEntity() {
     }
 
@@ -41,12 +44,18 @@ public class UserEntity {
             OffsetDateTime createdAt,
             OffsetDateTime updatedAt
     ) {
+        this(id, email, username, passwordHash, createdAt, updatedAt, true);
+    }
+
+    public UserEntity(UUID id, String email, String username, String passwordHash,
+                      OffsetDateTime createdAt, OffsetDateTime updatedAt, boolean emailVerified) {
         this.id = id;
         this.email = email;
         this.username = username;
         this.passwordHash = passwordHash;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.emailVerified = emailVerified;
     }
 
     public UUID getId() {
@@ -71,5 +80,15 @@ public class UserEntity {
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public boolean isEmailVerified() { return emailVerified; }
+
+    @Override
+    public String toString() {
+        return "UserEntity[id=" + id + ", email=" + email + ", username=" + username
+                + ", createdAt=" + createdAt + ", updatedAt=" + updatedAt
+                + ", emailVerified=" + emailVerified
+                + ", passwordHash=[REDACTED]]";
     }
 }
