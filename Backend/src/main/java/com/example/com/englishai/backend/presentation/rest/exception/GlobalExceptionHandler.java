@@ -1,7 +1,11 @@
 package com.example.com.englishai.backend.presentation.rest.exception;
 
+import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.user.exception.CurrentUserNotFoundException;
+import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
 import com.example.com.englishai.backend.application.user.exception.UsernameAlreadyExistsException;
+import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,6 +17,28 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(UserAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleUserAlreadyExists(UserAlreadyExistsException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(exception.getMessage()));
+    }
+
+    @ExceptionHandler(CurrentUserNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleCurrentUserNotFound(CurrentUserNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .header(HttpHeaders.WWW_AUTHENTICATE, "Bearer")
+                .body(new ErrorResponse("Unauthorized"));
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(
+            InvalidCredentialsException exception
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse(exception.getMessage()));
+    }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)
     public ResponseEntity<ErrorResponse> handleEmailAlreadyExists(

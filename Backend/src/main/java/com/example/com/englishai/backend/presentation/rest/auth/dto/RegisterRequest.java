@@ -3,6 +3,7 @@ package com.example.com.englishai.backend.presentation.rest.auth.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import com.example.com.englishai.backend.presentation.rest.validation.Utf8ByteLength;
 
 public record RegisterRequest(
 
@@ -24,6 +25,7 @@ public record RegisterRequest(
                 max = 100,
                 message = "Password must be between 6 and 100 characters"
         )
+        @Utf8ByteLength(max = 72)
         String password
 ) {
 }

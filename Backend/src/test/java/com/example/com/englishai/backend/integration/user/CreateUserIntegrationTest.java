@@ -7,10 +7,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
+@Transactional
 class CreateUserIntegrationTest {
 
     @Autowired
@@ -23,20 +27,24 @@ class CreateUserIntegrationTest {
     @DisplayName("Should create and persist a user")
     void shouldCreateAndPersistUser() {
 
+        String uniqueValue = UUID.randomUUID().toString();
+        String email = "integration-" + uniqueValue + "@test.com";
+        String username = "user-" + uniqueValue.substring(0, 12);
+
         User user = createUser.execute(
-                "vitor@test.com",
-                "vitor",
+                email,
+                username,
                 "hashed-password"
         );
 
         assertThat(user.getId()).isNotNull();
-        assertThat(user.getEmail()).isEqualTo("vitor@test.com");
-        assertThat(user.getUsername()).isEqualTo("vitor");
+        assertThat(user.getEmail()).isEqualTo(email);
+        assertThat(user.getUsername()).isEqualTo(username);
 
         var savedUser = userJpaRepository.findById(user.getId());
 
         assertThat(savedUser).isPresent();
         assertThat(savedUser.get().getEmail())
-                .isEqualTo("vitor@test.com");
+                .isEqualTo(email);
     }
 }

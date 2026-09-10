@@ -1,11 +1,14 @@
 spring:
+  config:
+    # Supports starting from the repository root or from Backend/.
+    import: "optional:file:./Backend/.env[.properties],optional:file:./.env[.properties]"
   application:
     name: english-ai
 
   datasource:
-    url: jdbc:postgresql://localhost:5434/mydatabase
-    username: myuser
-    password: secret
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5434}/${POSTGRES_DB:mydatabase}
+    username: ${POSTGRES_USER:myuser}
+    password: ${POSTGRES_PASSWORD}
 
   jpa:
     hibernate:
@@ -20,4 +23,10 @@ spring:
     locations: classpath:db/migration
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
+
+security:
+  jwt:
+    # Base64-encoded random key containing at least 32 bytes. No default secret.
+    secret: ${JWT_SECRET}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}

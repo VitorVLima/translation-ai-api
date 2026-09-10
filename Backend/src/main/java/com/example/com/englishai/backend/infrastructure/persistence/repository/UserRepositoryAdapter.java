@@ -1,10 +1,12 @@
 package com.example.com.englishai.backend.infrastructure.persistence.repository;
 
 import com.example.com.englishai.backend.application.ports.UserRepository;
+import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
 import com.example.com.englishai.backend.domain.user.User;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.mapper.UserMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -27,7 +29,13 @@ public class UserRepositoryAdapter implements UserRepository {
     public User save(User user) {
         UserEntity entity = userMapper.toEntity(user);
 
-        UserEntity savedEntity = userJpaRepository.save(entity);
+        UserEntity savedEntity;
+        try {
+            savedEntity = userJpaRepository.save(entity);
+        } catch (DataIntegrityViolationException exception) {
+            // The database UNIQUE constraints remain the final concurrency guard.
+            throw new UserAlreadyExistsException();
+        }
 
         return userMapper.toDomain(savedEntity);
     }
