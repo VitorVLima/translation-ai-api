@@ -1,6 +1,8 @@
 package com.example.com.englishai.backend.presentation.rest.auth;
 
 import com.example.com.englishai.backend.application.authentication.LoginUser;
+import com.example.com.englishai.backend.application.authentication.RefreshAccessToken;
+import com.example.com.englishai.backend.application.authentication.LogoutSession;
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
@@ -34,6 +36,12 @@ class AuthControllerRegisterTest {
 
     @MockitoBean
     private LoginUser loginUser;
+
+    @MockitoBean
+    private RefreshAccessToken refreshAccessToken;
+
+    @MockitoBean
+    private LogoutSession logoutSession;
 
     @MockitoBean
     private AuthenticationTokenValidator tokenValidator;

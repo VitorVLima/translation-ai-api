@@ -87,6 +87,16 @@ class UserControllerTest {
         verifyNoInteractions(repository);
     }
 
+    @Test
+    void shouldNotAcceptOpaqueRefreshTokenAsBearerAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer opaque-refresh-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json("{\"message\":\"Unauthorized\"}"));
+
+        verifyNoInteractions(repository);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"malformed", "expired", "wrong-key"})
     void shouldRejectInvalidAuthenticationBeforeReadingDatabase(String scenario) throws Exception {

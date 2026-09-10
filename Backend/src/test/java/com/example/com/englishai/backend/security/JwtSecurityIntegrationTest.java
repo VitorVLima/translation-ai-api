@@ -2,6 +2,8 @@ package com.example.com.englishai.backend.security;
 
 import com.example.com.englishai.backend.application.authentication.LoginUser;
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
+import com.example.com.englishai.backend.application.authentication.RefreshAccessToken;
+import com.example.com.englishai.backend.application.authentication.LogoutSession;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenGenerator;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenValidator;
@@ -50,6 +52,12 @@ class JwtSecurityIntegrationTest {
     private LoginUser loginUser;
     @MockitoBean
     private RegisterUser registerUser;
+
+    @MockitoBean
+    private RefreshAccessToken refreshAccessToken;
+
+    @MockitoBean
+    private LogoutSession logoutSession;
 
     @Autowired
     JwtSecurityIntegrationTest(MockMvc mockMvc) {
