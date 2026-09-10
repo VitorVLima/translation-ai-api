@@ -34,12 +34,69 @@ class JwtTokenValidatorTest {
     private final Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     private final UUID userId = UUID.randomUUID();
     private final JwtTokenValidator validator = new JwtTokenValidator(secret, clock);
+    private static final String ISSUER = "englishai";
+    private static final String AUDIENCE = "englishai-api";
 
     @Test
     void shouldAcceptGeneratedTokenAndExtractExactUserId() {
         String token = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock).generate(userId);
 
         assertThat(validator.validateAndGetUserId(token)).isEqualTo(userId);
+    }
+
+    @Test
+    void shouldAcceptConfiguredIssuerAndAudience() {
+        JwtTokenValidator custom = new JwtTokenValidator(secret, clock, Duration.ofSeconds(60), "custom-issuer", "custom-api");
+        String token = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock, "custom-issuer", "custom-api").generate(userId);
+        assertThat(custom.validateAndGetUserId(token)).isEqualTo(userId);
+    }
+
+    @Test
+    void shouldRejectMissingIssuerOrAudience() throws Exception {
+        assertInvalid(sign(new JWTClaimsSet.Builder().subject(userId.toString())
+                .claim("token_type", "access").issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(60))).build(), JWSAlgorithm.HS256));
+    }
+
+    @Test
+    void shouldRejectWrongIssuerOrAudience() throws Exception {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder().subject(userId.toString())
+                .issuer("wrong").audience("other-api").claim("token_type", "access")
+                .issueTime(Date.from(now)).expirationTime(Date.from(now.plusSeconds(60))).build();
+        assertInvalid(sign(claims, JWSAlgorithm.HS256));
+    }
+
+    @Test
+    void shouldAcceptIssueTimeExactlyAtConfiguredSkew() throws Exception {
+        JwtTokenValidator defaultSkew = new JwtTokenValidator(secret, clock);
+        assertThat(defaultSkew.validateAndGetUserId(sign(new JWTClaimsSet.Builder(validClaims())
+                .issueTime(Date.from(now.plusSeconds(60))).build(), JWSAlgorithm.HS256))).isEqualTo(userId);
+    }
+
+    @Test
+    void shouldRejectIssueTimeBeyondConfiguredSkew() throws Exception {
+        JwtTokenValidator skewed = new JwtTokenValidator(secret, clock, Duration.ofSeconds(60));
+        assertInvalidWith(skewed, sign(new JWTClaimsSet.Builder(validClaims())
+                .issueTime(Date.from(now.plusSeconds(61))).build(), JWSAlgorithm.HS256));
+    }
+
+    @Test
+    void shouldRejectNegativeClockSkew() {
+        assertThatThrownBy(() -> new JwtTokenValidator(secret, clock, Duration.ofSeconds(-1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldRejectMissingIssueTime() throws Exception {
+        assertInvalid(sign(new JWTClaimsSet.Builder()
+                .subject(userId.toString()).claim("token_type", "access")
+                .expirationTime(Date.from(now.plusSeconds(60))).build(), JWSAlgorithm.HS256));
+    }
+
+    @Test
+    void shouldRejectMalformedIssueTime() throws Exception {
+        assertInvalid(sign(new JWTClaimsSet.Builder(validClaims())
+                .claim("iat", "not-a-date").build(), JWSAlgorithm.HS256));
     }
 
     @Test
@@ -55,6 +112,8 @@ class JwtTokenValidatorTest {
     void shouldRejectExpiredTokenIncludingExactExpirationInstant(long seconds) throws Exception {
         String token = sign(new JWTClaimsSet.Builder()
                 .subject(userId.toString())
+                .issuer(ISSUER)
+                .audience(AUDIENCE)
                 .claim("token_type", "access")
                 .expirationTime(Date.from(now.plusSeconds(seconds)))
                 .build(), JWSAlgorithm.HS256);
@@ -81,6 +140,7 @@ class JwtTokenValidatorTest {
         assertInvalid(sign(new JWTClaimsSet.Builder()
                 .subject(subject)
                 .claim("token_type", "access")
+                .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plusSeconds(60)))
                 .build(), JWSAlgorithm.HS256));
     }
@@ -152,7 +212,10 @@ class JwtTokenValidatorTest {
     private JWTClaimsSet validClaims() {
         return new JWTClaimsSet.Builder()
                 .subject(userId.toString())
+                .issuer(ISSUER)
+                .audience(AUDIENCE)
                 .claim("token_type", "access")
+                .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plusSeconds(60)))
                 .build();
     }
@@ -164,6 +227,13 @@ class JwtTokenValidatorTest {
     }
 
     private void assertInvalid(String token) {
+        assertThatThrownBy(() -> validator.validateAndGetUserId(token))
+                .isInstanceOf(InvalidAuthenticationTokenException.class)
+                .hasMessage("Invalid or expired authentication token")
+                .hasNoCause();
+    }
+
+    private void assertInvalidWith(JwtTokenValidator validator, String token) {
         assertThatThrownBy(() -> validator.validateAndGetUserId(token))
                 .isInstanceOf(InvalidAuthenticationTokenException.class)
                 .hasMessage("Invalid or expired authentication token")

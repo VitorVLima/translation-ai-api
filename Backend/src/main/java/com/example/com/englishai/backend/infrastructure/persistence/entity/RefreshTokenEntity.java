@@ -83,4 +83,12 @@ public class RefreshTokenEntity {
     public OffsetDateTime getRevokedAt() { return revokedAt; }
     public UUID getReplacedById() { return replacedById; }
     public TokenRevocationReason getRevocationReason() { return revocationReason; }
+
+    @Override
+    public String toString() {
+        return "RefreshTokenEntity[id=" + id + ", userId=" + userId + ", familyId=" + familyId
+                + ", expiresAt=" + expiresAt + ", createdAt=" + createdAt
+                + ", revokedAt=" + revokedAt + ", replacedById=" + replacedById
+                + ", revocationReason=" + revocationReason + ", tokenHash=[REDACTED]]";
+    }
 }

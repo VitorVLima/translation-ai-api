@@ -47,4 +47,10 @@ class BCryptPasswordEncoderAdapterTest {
 
         assertThat(matches).isFalse();
     }
+
+    @Test
+    void shouldVerifyAgainstStableDummyHash() {
+        assertThat(passwordEncoder.matchesDummy("any-password")).isFalse();
+        assertThat(passwordEncoder.matchesDummy("another-password")).isFalse();
+    }
 }

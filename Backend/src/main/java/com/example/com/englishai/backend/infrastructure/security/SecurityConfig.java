@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.beans.factory.ObjectProvider;
 
 @Configuration
 @EnableWebSecurity
@@ -17,7 +18,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            AuthenticationTokenValidator tokenValidator
+            AuthenticationTokenValidator tokenValidator,
+            ObjectProvider<AuthenticationRateLimitFilter> rateLimitFilter
     ) throws Exception {
 
         var entryPoint = new UnauthorizedEntryPoint();
@@ -46,12 +48,20 @@ public class SecurityConfig {
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/refresh"
                                 ,
-                                "/api/v1/auth/logout"
+                                "/api/v1/auth/logout",
+                                "/api/v1/auth/verify-email"
+                                ,
+                                "/api/v1/auth/resend-verification"
+                                ,
+                                "/api/v1/auth/forgot-password"
+                                ,
+                                "/api/v1/auth/reset-password"
                         ).permitAll()
 
                         .anyRequest().authenticated()
                 );
 
+        rateLimitFilter.ifAvailable(filter -> http.addFilterBefore(filter, JwtAuthenticationFilter.class));
         return http.build();
     }
 }

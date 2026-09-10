@@ -2,6 +2,10 @@ package com.example.com.englishai.backend.presentation.rest.exception;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidRefreshTokenException;
+import com.example.com.englishai.backend.application.authentication.exception.RateLimitExceededException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidEmailVerificationCodeException;
+import com.example.com.englishai.backend.application.authentication.exception.EmailVerificationRequiredException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidPasswordResetCodeException;
 import com.example.com.englishai.backend.application.user.exception.CurrentUserNotFoundException;
 import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
@@ -18,6 +22,11 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimit(RateLimitExceededException exception) {
+        return RateLimitHttpResponse.entity(exception);
+    }
 
     @ExceptionHandler(UserAlreadyExistsException.class)
     public ResponseEntity<ErrorResponse> handleUserAlreadyExists(UserAlreadyExistsException exception) {
@@ -41,11 +50,29 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(exception.getMessage()));
     }
 
+    @ExceptionHandler(EmailVerificationRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleEmailVerificationRequired(EmailVerificationRequiredException exception) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .body(new ErrorResponse("Email verification required"));
+    }
+
     @ExceptionHandler(InvalidRefreshTokenException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse("Invalid refresh token"));
+    }
+
+    @ExceptionHandler(InvalidEmailVerificationCodeException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidEmailVerificationCode(InvalidEmailVerificationCodeException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid or expired verification code"));
+    }
+
+    @ExceptionHandler(InvalidPasswordResetCodeException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidPasswordResetCode(InvalidPasswordResetCodeException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid or expired password reset code"));
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)

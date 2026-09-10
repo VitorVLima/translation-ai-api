@@ -82,4 +82,12 @@ public class RefreshToken {
     }
 
     public TokenRevocationReason getRevocationReason() { return revocationReason; }
+
+    @Override
+    public String toString() {
+        return "RefreshToken[id=" + id + ", userId=" + userId + ", familyId=" + familyId
+                + ", expiresAt=" + expiresAt + ", createdAt=" + createdAt
+                + ", revokedAt=" + revokedAt + ", replacedById=" + replacedById
+                + ", revocationReason=" + revocationReason + ", tokenHash=[REDACTED]]";
+    }
 }

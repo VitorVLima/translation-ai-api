@@ -27,4 +27,9 @@ public interface RefreshTokenFamilyJpaRepository extends JpaRepository<RefreshTo
     @Query("update RefreshTokenFamilyEntity family set family.revokedAt = :revokedAt, family.revocationReason = :reason where family.id = :id")
     int revokeById(@Param("id") UUID id, @Param("revokedAt") OffsetDateTime revokedAt,
                    @Param("reason") RefreshTokenFamilyRevocationReason reason);
+
+    @Modifying
+    @Query("update RefreshTokenFamilyEntity family set family.revokedAt = :revokedAt, family.revocationReason = :reason where family.userId = :userId and family.revokedAt is null")
+    int revokeAllByUserId(@Param("userId") UUID userId, @Param("revokedAt") OffsetDateTime revokedAt,
+                          @Param("reason") RefreshTokenFamilyRevocationReason reason);
 }

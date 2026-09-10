@@ -7,4 +7,9 @@ public record TokenPairResponse(String accessToken, String refreshToken) {
     public static TokenPairResponse from(RefreshAccessTokenResult result) {
         return new TokenPairResponse(result.accessToken(), result.refreshToken());
     }
+
+    @Override
+    public String toString() {
+        return "TokenPairResponse[accessToken=[REDACTED], refreshToken=[REDACTED]]";
+    }
 }

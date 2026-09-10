@@ -1,0 +1,1 @@
+package com.example.com.englishai.backend.presentation.rest.auth.dto; import jakarta.validation.constraints.*; public record ForgotPasswordRequest(@NotBlank @Email String email){@Override public String toString(){return "ForgotPasswordRequest[email=[REDACTED]]";}}

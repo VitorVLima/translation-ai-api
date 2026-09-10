@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.application.authentication;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
+import com.example.com.englishai.backend.application.authentication.exception.EmailVerificationRequiredException;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenGenerator;
 import com.example.com.englishai.backend.application.ports.PasswordEncoder;
 import com.example.com.englishai.backend.application.ports.RefreshTokenGenerator;
@@ -13,6 +14,7 @@ import com.example.com.englishai.backend.domain.authentication.RefreshToken;
 import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamily;
 import com.example.com.englishai.backend.domain.user.User;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -33,6 +35,7 @@ public class LoginUser {
     private final RefreshTokenFamilyRepository refreshTokenFamilyRepository;
     private final RefreshTokenTransaction refreshTokenTransaction;
     private final Duration refreshTokenExpiration;
+    private final Duration familyMaxLifetime;
     private final Clock clock;
 
     @Autowired
@@ -44,7 +47,8 @@ public class LoginUser {
             RefreshTokenHasher refreshTokenHasher,
             RefreshTokenFamilyRepository refreshTokenFamilyRepository,
             RefreshTokenTransaction refreshTokenTransaction,
-            Duration refreshTokenExpiration,
+            @Qualifier("refreshTokenExpiration") Duration refreshTokenExpiration,
+            @Qualifier("refreshTokenFamilyMaxLifetime") Duration familyMaxLifetime,
             Clock clock
     ) {
         this.userRepository = userRepository;
@@ -60,15 +64,34 @@ public class LoginUser {
             throw new IllegalArgumentException("Refresh token expiration must be positive");
         }
         this.refreshTokenExpiration = refreshTokenExpiration;
+        if (familyMaxLifetime == null || familyMaxLifetime.isZero() || familyMaxLifetime.isNegative()) {
+            throw new IllegalArgumentException("Refresh token family lifetime must be positive");
+        }
+        this.familyMaxLifetime = familyMaxLifetime;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
     }
 
+    public LoginUser(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                     AuthenticationTokenGenerator accessTokenGenerator, RefreshTokenGenerator refreshTokenGenerator,
+                     RefreshTokenHasher refreshTokenHasher, RefreshTokenFamilyRepository refreshTokenFamilyRepository,
+                     RefreshTokenTransaction refreshTokenTransaction, Duration refreshTokenExpiration, Clock clock) {
+        this(userRepository, passwordEncoder, accessTokenGenerator, refreshTokenGenerator, refreshTokenHasher,
+                refreshTokenFamilyRepository, refreshTokenTransaction, refreshTokenExpiration, refreshTokenExpiration, clock);
+    }
+
     public LoginResult execute(String email, String rawPassword) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(InvalidCredentialsException::new);
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+            passwordEncoder.matchesDummy(rawPassword);
+            throw new InvalidCredentialsException();
+        }
 
         if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
+        }
+
+        if (!user.isEmailVerified()) {
+            throw new EmailVerificationRequiredException();
         }
 
         String accessToken = accessTokenGenerator.generate(user.getId());
@@ -81,11 +104,12 @@ public class LoginUser {
         String tokenHash = refreshTokenHasher.hash(rawRefreshToken);
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         UUID familyId = UUID.randomUUID();
+        OffsetDateTime familyExpiresAt = now.plus(familyMaxLifetime);
         refreshTokenFamilyRepository.save(new RefreshTokenFamily(
                 familyId,
                 user.getId(),
                 now,
-                now.plus(refreshTokenExpiration),
+                familyExpiresAt,
                 null
         ));
         repository.save(new RefreshToken(
@@ -93,11 +117,15 @@ public class LoginUser {
                 user.getId(),
                 familyId,
                 tokenHash,
-                now.plus(refreshTokenExpiration),
+                min(now.plus(refreshTokenExpiration), familyExpiresAt),
                 now,
                 null,
                 null
         ));
         return rawRefreshToken;
+    }
+
+    private static OffsetDateTime min(OffsetDateTime first, OffsetDateTime second) {
+        return first.isBefore(second) ? first : second;
     }
 }

@@ -7,4 +7,9 @@ public record LoginResult(User user, String accessToken, String refreshToken) {
     public LoginResult(User user, String accessToken) {
         this(user, accessToken, null);
     }
+
+    @Override
+    public String toString() {
+        return "LoginResult[user=" + user + ", accessToken=[REDACTED], refreshToken=[REDACTED]]";
+    }
 }

@@ -60,4 +60,10 @@ public class RefreshTokenFamilyRepositoryAdapter implements RefreshTokenFamilyRe
     public void revoke(UUID id, OffsetDateTime revokedAt, RefreshTokenFamilyRevocationReason reason) {
         jpaRepository.revokeById(id, revokedAt, reason);
     }
+
+    @Override
+    @Transactional
+    public void revokeAllByUserId(UUID userId, OffsetDateTime revokedAt, RefreshTokenFamilyRevocationReason reason) {
+        jpaRepository.revokeAllByUserId(userId, revokedAt, reason);
+    }
 }

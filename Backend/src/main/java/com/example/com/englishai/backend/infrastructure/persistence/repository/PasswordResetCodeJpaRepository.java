@@ -1,0 +1,2 @@
+package com.example.com.englishai.backend.infrastructure.persistence.repository; import org.springframework.data.jpa.repository.*; import jakarta.persistence.LockModeType; import com.example.com.englishai.backend.infrastructure.persistence.entity.PasswordResetCodeEntity; import java.util.*;
+public interface PasswordResetCodeJpaRepository extends JpaRepository<PasswordResetCodeEntity,UUID> { @Lock(LockModeType.PESSIMISTIC_WRITE) List<PasswordResetCodeEntity> findByUserIdOrderByCreatedAtDesc(UUID userId); }

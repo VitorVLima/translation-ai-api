@@ -40,6 +40,7 @@ class CreateUserIntegrationTest {
         assertThat(user.getId()).isNotNull();
         assertThat(user.getEmail()).isEqualTo(email);
         assertThat(user.getUsername()).isEqualTo(username);
+        assertThat(user.isEmailVerified()).isFalse();
 
         var savedUser = userJpaRepository.findById(user.getId());
 
