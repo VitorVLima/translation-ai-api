@@ -9,6 +9,7 @@ import com.example.com.englishai.backend.application.authentication.LoginResult;
 import com.example.com.englishai.backend.application.authentication.RegisterUser;
 import com.example.com.englishai.backend.application.authentication.VerifyEmailCode;
 import com.example.com.englishai.backend.application.authentication.ResetPassword;
+import com.example.com.englishai.backend.application.authentication.LoginWithGoogle;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidCredentialsException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidRefreshTokenException;
 import com.example.com.englishai.backend.application.authentication.exception.RefreshTokenReuseException;
@@ -53,6 +54,9 @@ class AuthControllerLoginTest {
 
     @MockitoBean
     private ResetPassword resetPassword;
+
+    @MockitoBean
+    private LoginWithGoogle loginWithGoogle;
 
     @MockitoBean
     private RegisterUser registerUser;
@@ -310,6 +314,23 @@ class AuthControllerLoginTest {
         mockMvc.perform(get("/api/v1/auth/reset-password"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(unauthenticated());
+    }
+
+    @Test
+    void shouldAllowAnonymousGoogleLoginAndReturnEnglishAiTokens() throws Exception {
+        UUID id = UUID.randomUUID();
+        User user = new User(id, "google@test.com", "google-user", null, OffsetDateTime.now(), OffsetDateTime.now(), true);
+        when(loginWithGoogle.execute("google-id-token", "nonce")).thenReturn(new LoginResult(user, "access", "refresh"));
+
+        mockMvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"credential\":\"google-id-token\",\"nonce\":\"nonce\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Pragma", "no-cache"))
+                .andExpect(jsonPath("$.accessToken").value("access"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh"))
+                .andExpect(jsonPath("$.user.email").value("google@test.com"));
     }
 
     @Test

@@ -34,10 +34,13 @@ public class RateLimitConfig {
             @Value("${SECURITY_RATE_LIMIT_RESEND_VERIFICATION_IP_CAPACITY:5}") int resendCap,
             @Value("${SECURITY_RATE_LIMIT_RESEND_VERIFICATION_WINDOW_SECONDS:600}") long resendWindow,
             @Value("${SECURITY_RATE_LIMIT_RESET_PASSWORD_IP_CAPACITY:10}") int resetCap,
-            @Value("${SECURITY_RATE_LIMIT_RESET_PASSWORD_WINDOW_SECONDS:600}") long resetWindow) {
+            @Value("${SECURITY_RATE_LIMIT_RESET_PASSWORD_WINDOW_SECONDS:600}") long resetWindow,
+            @Value("${SECURITY_RATE_LIMIT_GOOGLE_LOGIN_CAPACITY:10}") int googleCap,
+            @Value("${SECURITY_RATE_LIMIT_GOOGLE_LOGIN_WINDOW_SECONDS:600}") long googleWindow) {
         return new AuthenticationRateLimitFilter(service, resolver, loginCap, Duration.ofSeconds(loginWindow),
                 registerCap, Duration.ofSeconds(registerWindow), refreshCap, Duration.ofSeconds(refreshWindow),
                 logoutCap, Duration.ofSeconds(logoutWindow), verifyEmailCap, Duration.ofSeconds(verifyEmailWindow),
-                resendCap, Duration.ofSeconds(resendWindow), resetCap, Duration.ofSeconds(resetWindow));
+                resendCap, Duration.ofSeconds(resendWindow), resetCap, Duration.ofSeconds(resetWindow),
+                googleCap, Duration.ofSeconds(googleWindow));
     }
 }
