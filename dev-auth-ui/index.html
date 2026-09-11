@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EnglishAI - Auth Dev UI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="card">
+    <h1>EnglishAI</h1>
+    <section id="login-view">
+      <h2>Entrar</h2>
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required>
+        <label for="password">Senha</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Entrar</button>
+      </form>
+      <p class="separator">ou</p>
+      <div id="google-button"></div>
+      <p id="message" role="alert" aria-live="polite"></p>
+    </section>
+    <section id="home-view" hidden>
+      <h2>Home</h2>
+      <p>Olá, <strong id="username"></strong></p>
+      <dl>
+        <dt>Email</dt><dd id="user-email"></dd>
+        <dt>Conta verificada</dt><dd id="verified"></dd>
+      </dl>
+      <button id="logout" type="button">Logout</button>
+      <p id="home-message" role="alert" aria-live="polite"></p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

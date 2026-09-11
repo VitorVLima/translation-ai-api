@@ -10,10 +10,31 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    @Bean
+    CorsConfigurationSource corsConfigurationSource(
+            @Value("${APP_CORS_ALLOWED_ORIGINS:http://localhost:5500}") String allowedOrigins) {
+        var configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
+        configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Content-Type", "Authorization"));
+        configuration.setAllowCredentials(false);
+        var source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(
@@ -39,6 +60,7 @@ public class SecurityConfig {
                 // Como estamos criando uma API REST,
                 // não precisamos de CSRF baseado em sessão.
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> {})
 
                 // Regras de autorização
                 .authorizeHttpRequests(auth -> auth
@@ -56,6 +78,10 @@ public class SecurityConfig {
                                 "/api/v1/auth/forgot-password"
                                 ,
                                 "/api/v1/auth/reset-password"
+                                ,
+                                "/api/v1/auth/google"
+                                ,
+                                "/api/v1/auth/google/nonce"
                         ).permitAll()
 
                         .anyRequest().authenticated()

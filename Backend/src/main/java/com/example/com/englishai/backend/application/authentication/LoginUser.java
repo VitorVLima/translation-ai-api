@@ -86,7 +86,7 @@ public class LoginUser {
             throw new InvalidCredentialsException();
         }
 
-        if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
         }
 

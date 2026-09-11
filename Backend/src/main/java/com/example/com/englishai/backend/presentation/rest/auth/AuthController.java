@@ -10,6 +10,8 @@ import com.example.com.englishai.backend.application.authentication.VerifyEmailC
 import com.example.com.englishai.backend.application.authentication.ResendEmailVerificationCode;
 import com.example.com.englishai.backend.application.authentication.RequestPasswordReset;
 import com.example.com.englishai.backend.application.authentication.ResetPassword;
+import com.example.com.englishai.backend.application.authentication.LoginWithGoogle;
+import com.example.com.englishai.backend.application.ports.GoogleLoginNonce;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ForgotPasswordRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginResponse;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginRequest;
@@ -22,6 +24,7 @@ import com.example.com.englishai.backend.presentation.rest.auth.dto.LogoutReques
 import com.example.com.englishai.backend.presentation.rest.auth.dto.VerifyEmailRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResendEmailVerificationRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResetPasswordRequest;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.GoogleLoginRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,13 +44,17 @@ public class AuthController {
     private final ObjectProvider<ResendEmailVerificationCode> resendEmailVerificationCode;
     private final ObjectProvider<RequestPasswordReset> requestPasswordReset;
     private final ObjectProvider<ResetPassword> resetPassword;
+    private final ObjectProvider<LoginWithGoogle> loginWithGoogle;
+    private final ObjectProvider<GoogleLoginNonce> googleLoginNonce;
 
     @Autowired
     public AuthController(RegisterUser registerUser, LoginUser loginUser, RefreshAccessToken refreshAccessToken,
                           LogoutSession logoutSession, ObjectProvider<VerifyEmailCode> verifyEmailCode,
                           ObjectProvider<ResendEmailVerificationCode> resendEmailVerificationCode,
                           ObjectProvider<RequestPasswordReset> requestPasswordReset,
-                          ObjectProvider<ResetPassword> resetPassword) {
+                          ObjectProvider<ResetPassword> resetPassword,
+                          ObjectProvider<LoginWithGoogle> loginWithGoogle,
+                          ObjectProvider<GoogleLoginNonce> googleLoginNonce) {
         this.registerUser = registerUser;
         this.loginUser = loginUser;
         this.refreshAccessToken = refreshAccessToken;
@@ -56,6 +63,8 @@ public class AuthController {
         this.resendEmailVerificationCode = resendEmailVerificationCode;
         this.requestPasswordReset = requestPasswordReset;
         this.resetPassword = resetPassword;
+        this.loginWithGoogle = loginWithGoogle;
+        this.googleLoginNonce = googleLoginNonce;
     }
 
     /** Compatibility constructor for focused controller advice tests. */
@@ -69,6 +78,8 @@ public class AuthController {
         this.resendEmailVerificationCode = null;
         this.requestPasswordReset = null;
         this.resetPassword = null;
+        this.loginWithGoogle = null;
+        this.googleLoginNonce = null;
     }
 
     @PostMapping("/verify-email")
@@ -99,6 +110,24 @@ public class AuthController {
         var useCase = resetPassword.getIfAvailable();
         if (useCase != null) useCase.execute(request.email(), request.code(), request.newPassword());
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<LoginResponse> google(@Valid @RequestBody GoogleLoginRequest request) {
+        var useCase = loginWithGoogle.getIfAvailable();
+        if (useCase == null) throw new com.example.com.englishai.backend.application.authentication.exception.InvalidExternalIdentityException();
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Pragma", "no-cache")
+                .body(LoginResponse.from(useCase.execute(request.credential(), request.nonce())));
+    }
+
+    @PostMapping("/google/nonce")
+    public ResponseEntity<java.util.Map<String, String>> googleNonce() {
+        var nonce = googleLoginNonce.getIfAvailable();
+        if (nonce == null) throw new com.example.com.englishai.backend.application.authentication.exception.InvalidExternalIdentityException();
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .header("Pragma", "no-cache")
+                .body(java.util.Map.of("nonce", nonce.issue()));
     }
 
     @PostMapping("/logout")

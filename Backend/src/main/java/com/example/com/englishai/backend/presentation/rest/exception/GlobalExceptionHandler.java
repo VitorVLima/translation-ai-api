@@ -6,6 +6,8 @@ import com.example.com.englishai.backend.application.authentication.exception.Ra
 import com.example.com.englishai.backend.application.authentication.exception.InvalidEmailVerificationCodeException;
 import com.example.com.englishai.backend.application.authentication.exception.EmailVerificationRequiredException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidPasswordResetCodeException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidExternalIdentityException;
+import com.example.com.englishai.backend.application.authentication.exception.AuthenticationMethodConflictException;
 import com.example.com.englishai.backend.application.user.exception.CurrentUserNotFoundException;
 import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
@@ -73,6 +75,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidPasswordResetCodeException.class)
     public ResponseEntity<ErrorResponse> handleInvalidPasswordResetCode(InvalidPasswordResetCodeException exception) {
         return ResponseEntity.badRequest().body(new ErrorResponse("Invalid or expired password reset code"));
+    }
+
+    @ExceptionHandler(InvalidExternalIdentityException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidExternalIdentity(InvalidExternalIdentityException exception) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ErrorResponse("Invalid external identity"));
+    }
+
+    @ExceptionHandler(AuthenticationMethodConflictException.class)
+    public ResponseEntity<ErrorResponse> handleAuthenticationMethodConflict(AuthenticationMethodConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(exception.getMessage()));
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)
