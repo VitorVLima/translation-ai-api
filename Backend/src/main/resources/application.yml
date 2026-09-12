@@ -32,6 +32,20 @@ spring:
       mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
       mail.smtp.starttls.required: ${MAIL_SMTP_STARTTLS_REQUIRED:true}
 
+ai:
+  llm:
+    provider: ${LLM_PROVIDER:ollama}
+    connect-timeout-seconds: ${LLM_CONNECT_TIMEOUT_SECONDS:5}
+    response-timeout-seconds: ${LLM_RESPONSE_TIMEOUT_SECONDS:120}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_MODEL:}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:}
+  translation:
+    max-characters: ${AI_TRANSLATION_MAX_CHARACTERS:5000}
+
 
 server:
   port: ${SERVER_PORT:8080}
@@ -53,5 +67,3 @@ security:
   google:
     client-id: ${GOOGLE_CLIENT_ID}
     clock-skew-seconds: ${SECURITY_GOOGLE_CLOCK_SKEW_SECONDS:60}
-
-

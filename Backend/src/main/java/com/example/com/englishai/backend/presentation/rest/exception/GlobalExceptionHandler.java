@@ -8,6 +8,9 @@ import com.example.com.englishai.backend.application.authentication.exception.Em
 import com.example.com.englishai.backend.application.authentication.exception.InvalidPasswordResetCodeException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidExternalIdentityException;
 import com.example.com.englishai.backend.application.authentication.exception.AuthenticationMethodConflictException;
+import com.example.com.englishai.backend.application.llm.LlmProviderException;
+import com.example.com.englishai.backend.application.translation.InvalidTranslationRequestException;
+import com.example.com.englishai.backend.application.translation.InvalidCorrectionRequestException;
 import com.example.com.englishai.backend.application.user.exception.CurrentUserNotFoundException;
 import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
@@ -24,6 +27,23 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(LlmProviderException.class)
+    public ResponseEntity<ErrorResponse> handleLlmProviderFailure(LlmProviderException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new ErrorResponse("AI service temporarily unavailable"));
+    }
+
+    @ExceptionHandler(InvalidTranslationRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidTranslationRequest(InvalidTranslationRequestException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid translation request"));
+    }
+
+    @ExceptionHandler(InvalidCorrectionRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCorrectionRequest(InvalidCorrectionRequestException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid correction request"));
+    }
 
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<ErrorResponse> handleRateLimit(RateLimitExceededException exception) {

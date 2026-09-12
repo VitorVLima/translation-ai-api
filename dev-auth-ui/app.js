@@ -1,76 +1,102 @@
-// Development-only UI. Tokens use sessionStorage here; React Native must use secure device storage.
+// Development-only UI. Tokens remain only in sessionStorage.
 const BACKEND_URL = "http://localhost:8080";
 const GOOGLE_CLIENT_ID = "491728559092-frggmogjfh3mmh0kkduuk11053lucfp3.apps.googleusercontent.com";
-const ACCESS_KEY = "englishai_access_token";
-const REFRESH_KEY = "englishai_refresh_token";
-
-const $ = (id) => document.getElementById(id);
-const loginView = $("login-view"), homeView = $("home-view"), message = $("message");
-const setMessage = (text = "") => { message.textContent = text; $("home-message").textContent = text; };
+const ACCESS_KEY = "englishai_access_token", REFRESH_KEY = "englishai_refresh_token";
+let chatHistory = [];
+const $ = id => document.getElementById(id);
+const loginView = $("login-view"), appView = $("app-view");
 const tokens = () => ({ accessToken: sessionStorage.getItem(ACCESS_KEY), refreshToken: sessionStorage.getItem(REFRESH_KEY) });
-const saveTokens = (data) => { if (data.accessToken && data.refreshToken) { sessionStorage.setItem(ACCESS_KEY, data.accessToken); sessionStorage.setItem(REFRESH_KEY, data.refreshToken); } };
+const saveTokens = data => { if (data?.accessToken && data?.refreshToken) { sessionStorage.setItem(ACCESS_KEY, data.accessToken); sessionStorage.setItem(REFRESH_KEY, data.refreshToken); } };
 const clearSession = () => { sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); };
+const setMessage = (id, text = "", success = false) => { const el = $(id); el.textContent = text; el.classList.toggle("success", success); };
+const errorMessage = status => status === 400 ? "Verifique os dados informados." : status === 429 ? "Muitas solicitaÃ§Ãµes. Tente novamente em instantes." : status === 503 ? "O serviÃ§o de IA estÃ¡ temporariamente indisponÃ­vel." : status === 401 ? "Sua sessÃ£o expirou." : "NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.";
 
 async function request(path, options = {}) {
   const response = await fetch(`${BACKEND_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
-  let body = null; try { body = await response.json(); } catch (_) { /* 204 */ }
+  let body = null; try { body = await response.json(); } catch (_) {}
   return { response, body };
+}
+async function authenticatedRequest(path, options = {}) {
+  const current = tokens();
+  let result = await request(path, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${current.accessToken || ""}` } });
+  if (result.response.status !== 401 || !current.refreshToken) return result;
+  let refreshed;
+  try { refreshed = await request("/api/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: current.refreshToken }) }); }
+  catch (_) { return { ...result, networkError: true }; }
+  if (!refreshed.response.ok || !refreshed.body?.accessToken || !refreshed.body?.refreshToken) {
+    return refreshed.response.status === 400 || refreshed.response.status === 401
+      ? { ...result, sessionInvalid: true } : { ...result, networkError: true };
+  }
+  saveTokens(refreshed.body);
+  return request(path, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${refreshed.body.accessToken}` } });
+}
+async function authenticatedStream(path, options = {}) {
+  const current = tokens();
+  let response = await fetch(`${BACKEND_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}), Authorization: `Bearer ${current.accessToken || ""}` } });
+  if (response.status !== 401 || !current.refreshToken) return response;
+  let refreshed;
+  try { refreshed = await request("/api/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: current.refreshToken }) }); } catch (_) { return response; }
+  if (!refreshed.response.ok || !refreshed.body?.accessToken || !refreshed.body?.refreshToken) return response;
+  saveTokens(refreshed.body);
+  return fetch(`${BACKEND_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}), Authorization: `Bearer ${refreshed.body.accessToken}` } });
+}
+function showLogin(message = "", clear = true) { if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; setMessage("message", message); }
+function showView(name) { document.querySelectorAll(".page-view").forEach(v => v.hidden = v.id !== `view-${name}`); document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === name)); }
+function elapsed(start) { return `ConcluÃ­do em ${((performance.now() - start) / 1000).toFixed(1)} s`; }
+async function loadCurrentUser() {
+  const current = tokens();
+  if (!current.accessToken && !current.refreshToken) return { kind: "none" };
+  try {
+    const result = await authenticatedRequest("/api/v1/users/me");
+    if (result.response.ok) return { kind: "user", user: result.body };
+    if (result.networkError) return { kind: "network" };
+    if (result.sessionInvalid || result.response.status === 401) return { kind: "expired" };
+    return { kind: "error" };
+  } catch (_) { return { kind: "network" }; }
 }
 
 async function loginLocal(event) {
-  event.preventDefault(); setMessage("");
-  try {
-    const { response, body } = await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
-    if (!response.ok) { setMessage(response.status === 403 ? "Verifique seu email antes de entrar" : response.status === 401 ? "Email ou senha invÃ¡lidos" : "NÃ£o foi possÃ­vel entrar"); return; }
-    saveTokens(body); await showHome();
-  } catch (_) { setMessage("NÃ£o foi possÃ­vel conectar ao servidor"); }
+  event.preventDefault(); setMessage("message"); const button = event.submitter; button.disabled = true;
+  try { const result = await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
+    if (!result.response.ok) { setMessage("message", result.response.status === 403 ? "Verifique seu email antes de entrar." : result.response.status === 401 ? "Email ou senha invÃ¡lidos." : "NÃ£o foi possÃ­vel entrar."); return; }
+    saveTokens(result.body); await showHome();
+  } catch (_) { setMessage("message", "NÃ£o foi possÃ­vel conectar ao servidor."); } finally { button.disabled = false; }
 }
+async function showHome() { const state = await loadCurrentUser(); if (state.kind !== "user") { if (state.kind === "none") showLogin(); else if (state.kind === "expired") showLogin("Sua sessÃ£o expirou. Entre novamente."); else showLogin("NÃ£o foi possÃ­vel conectar ao servidor.", false); return; } const user = state.user; loginView.hidden = true; appView.hidden = false; ["username", "header-username", "account-username"].forEach(id => $(id).textContent = user.username || ""); ["user-email", "account-email"].forEach(id => $(id).textContent = user.email || ""); const verified = user.emailVerified === true ? "Sim" : user.emailVerified === false ? "NÃ£o" : "NÃ£o informado"; $("verified").textContent = verified; $("account-verified").textContent = verified; showView("home"); }
 
-async function loadCurrentUser() {
-  const current = tokens();
-  if (!current.accessToken) return null;
-  let result = await request("/api/v1/users/me", { headers: { Authorization: `Bearer ${current.accessToken}` } });
-  if (result.response.status === 401 && current.refreshToken) {
-    const refreshed = await request("/api/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: current.refreshToken }) });
-    if (refreshed.response.ok && refreshed.body?.accessToken && refreshed.body?.refreshToken) {
-      saveTokens(refreshed.body);
-      const next = tokens();
-      result = await request("/api/v1/users/me", { headers: { Authorization: `Bearer ${next.accessToken}` } });
-    }
-  }
-  if (result.response.ok) return result.body;
-  clearSession(); return null;
+async function runAi({ buttonId, statusId, path, body, onSuccess, loading }) {
+  const button = $(buttonId), start = performance.now(); button.disabled = true; button.textContent = loading; setMessage(statusId);
+  try { const result = await authenticatedRequest(path, { method: "POST", body: JSON.stringify(body) }); if (result.response.ok) { onSuccess(result.body); setMessage(statusId, elapsed(start), true); return result; } if (result.networkError) setMessage(statusId, "NÃ£o foi possÃ­vel conectar ao servidor."); else if (result.sessionInvalid || result.response.status === 401) showLogin("Sua sessÃ£o expirou. Entre novamente."); else setMessage(statusId, errorMessage(result.response.status)); return result; }
+  catch (_) { setMessage(statusId, "NÃ£o foi possÃ­vel conectar ao servidor."); return null; } finally { button.disabled = false; button.textContent = buttonId === "translate" ? "Traduzir" : buttonId === "correct" ? "Corrigir" : "Explicar correÃ§Ã£o"; }
 }
+async function translate() { const text = $("translation-text").value, sourceLanguage = $("source-language").value, targetLanguage = $("target-language").value; $("translation-result").value = ""; if (!text.trim()) return setMessage("translation-status", "Digite um texto para traduzir."); if (sourceLanguage === targetLanguage) return setMessage("translation-status", "Escolha idiomas diferentes."); if (text.length > 5000) return setMessage("translation-status", "O texto deve ter no mÃ¡ximo 5000 caracteres."); await runAi({ buttonId: "translate", statusId: "translation-status", path: "/api/v1/translate", body: { text, sourceLanguage, targetLanguage }, loading: "Traduzindo...", onSuccess: data => { $("translation-result").value = data?.translation || ""; } }); }
+async function correct() { const text = $("correction-text").value, language = $("correction-language").value; $("corrected-result").value = ""; $("explain-correction").disabled = true; $("explanation-card").hidden = true; if (!text.trim()) return setMessage("correction-status", "Digite um texto para corrigir."); if (text.length > 5000) return setMessage("correction-status", "O texto deve ter no mÃ¡ximo 5000 caracteres."); await runAi({ buttonId: "correct", statusId: "correction-status", path: "/api/v1/correct", body: { text, language }, loading: "Corrigindo...", onSuccess: data => { $("corrected-result").value = data?.correctedText || ""; $("explain-correction").disabled = false; if (data?.correctedText === text) setMessage("correction-status", "O texto jÃ¡ estÃ¡ correto.", true); } }); }
+async function explainCorrection() { const originalText = $("correction-text").value, correctedText = $("corrected-result").value, language = $("correction-language").value; await runAi({ buttonId: "explain-correction", statusId: "explanation-status", path: "/api/v1/correct/explain", body: { originalText, correctedText, language }, loading: "Gerando explicaÃ§Ã£o...", onSuccess: data => { $("explanation-result").textContent = data?.explanation || ""; $("explanation-card").hidden = false; } }); }
 
-async function showHome() {
-  const user = await loadCurrentUser();
-  if (!user) { loginView.hidden = false; homeView.hidden = true; setMessage("Sua sessÃ£o expirou"); return; }
-  $("username").textContent = user.username || ""; $("user-email").textContent = user.email || "";
-  $("verified").textContent = user.emailVerified === true ? "Sim" : user.emailVerified === false ? "NÃ£o" : "NÃ£o informado"; loginView.hidden = true; homeView.hidden = false; setMessage("");
-}
+async function prepareGoogle() { if (!window.google?.accounts?.id || GOOGLE_CLIENT_ID.startsWith("COLOQUE")) return setMessage("message", "Configure GOOGLE_CLIENT_ID no app.js."); try { const nonceResult = await request("/api/v1/auth/google/nonce", { method: "POST" }); if (!nonceResult.response.ok || !nonceResult.body?.nonce) throw new Error(); const nonce = nonceResult.body.nonce; google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, nonce, callback: async credential => { try { const result = await request("/api/v1/auth/google", { method: "POST", body: JSON.stringify({ credential: credential.credential, nonce }) }); if (!result.response.ok) { setMessage("message", "NÃ£o foi possÃ­vel entrar com Google."); return prepareGoogle(); } saveTokens(result.body); await showHome(); } catch (_) { setMessage("message", "NÃ£o foi possÃ­vel conectar ao servidor."); } } }); $("google-button").replaceChildren(); google.accounts.id.renderButton($("google-button"), { theme: "outline", size: "large", width: 280 }); } catch (_) { setMessage("message", "NÃ£o foi possÃ­vel conectar ao servidor."); } }
+async function logout() { const refreshToken = tokens().refreshToken; try { if (refreshToken) await request("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }); } finally { showLogin(); } }
 
-async function prepareGoogle() {
-  if (!window.google?.accounts?.id || GOOGLE_CLIENT_ID.startsWith("COLOQUE")) { setMessage("Configure GOOGLE_CLIENT_ID no app.js"); return; }
-  try {
-    const nonceResult = await request("/api/v1/auth/google/nonce", { method: "POST" });
-    if (!nonceResult.response.ok || !nonceResult.body?.nonce) throw new Error();
-    google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, nonce: nonceResult.body.nonce, callback: async (credential) => {
-      try {
-        const result = await request("/api/v1/auth/google", { method: "POST", body: JSON.stringify({ credential: credential.credential, nonce: nonceResult.body.nonce }) });
-        if (!result.response.ok) { setMessage("NÃ£o foi possÃ­vel entrar com Google"); await prepareGoogle(); return; }
-        saveTokens(result.body); await showHome();
-      } catch (_) { setMessage("NÃ£o foi possÃ­vel conectar ao servidor"); await prepareGoogle(); }
-    }});
-    $("google-button").replaceChildren(); google.accounts.id.renderButton($("google-button"), { theme: "outline", size: "large" });
-  } catch (_) { setMessage("NÃ£o foi possÃ­vel conectar ao servidor"); }
-}
+document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
+$("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("clear-chat").addEventListener("click", () => { chatHistory = []; const messages = $("chat-messages"); messages.replaceChildren(); const welcome = document.createElement("div"); welcome.className = "chat-welcome"; const title = document.createElement("strong"); title.textContent = "EnglishAI"; const text = document.createElement("span"); text.textContent = "Start a conversation to practice."; welcome.append(title, text); messages.append(welcome); setMessage("chat-status"); }); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout").addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct); $("explain-correction").addEventListener("click", explainCorrection);
+$("translation-text").addEventListener("input", () => $("translation-count").textContent = $("translation-text").value.length); $("correction-text").addEventListener("input", () => $("correction-count").textContent = $("correction-text").value.length); $("swap-languages").addEventListener("click", () => { const a = $("source-language"), b = $("target-language"), value = a.value; a.value = b.value; b.value = value; });
+function appendChatMessage(role,text,pending=false){const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong");label.textContent=role==="user"?"Você":"EnglishAI";const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);$("chat-messages").append(item);$("chat-messages").scrollTo({top:$('chat-messages').scrollHeight,behavior:'smooth'});return {item,bubble};}
+async function chatAction(button,path,body,output,loading){const start=performance.now();button.disabled=true;button.textContent=loading;try{const result=await authenticatedRequest(path,{method:"POST",body:JSON.stringify(body)});if(result.response.ok){output.textContent=result.body?.translation||result.body?.explanation||"";output.hidden=false;const time=document.createElement("small");time.className="chat-time";time.textContent=`Gerado em ${((performance.now()-start)/1000).toFixed(1)} s`;output.parentElement.append(time);}else{output.textContent=result.networkError?"Não foi possível conectar ao servidor.":errorMessage(result.response.status);output.hidden=false;if(result.sessionInvalid||result.response.status===401)showLogin("Sua sessão expirou. Entre novamente.");}}catch(_){output.textContent="Não foi possível conectar ao servidor.";output.hidden=false;}finally{button.disabled=false;button.textContent=path.includes("explain")?"Explicar":"Traduzir";}}
+async function sendChat(event){event.preventDefault();if($("send-chat").disabled)return;const input=$("chat-message"),message=input.value,language=$("chat-language").value;if(!message.trim())return setMessage("chat-status","Digite uma mensagem.");if(message.length>5000)return setMessage("chat-status","A mensagem deve ter no máximo 5000 caracteres.");const send=$("send-chat");send.disabled=true;setMessage("chat-status");appendChatMessage("user",message);input.value="";$("chat-count").textContent="0";const pending=appendChatMessage("assistant","EnglishAI está pensando...",true);const start=performance.now();try{const result=await authenticatedRequest("/api/v1/chat",{method:"POST",body:JSON.stringify({message,language,history:chatHistory.slice(-10)})});pending.item.remove();if(result.response.ok){chatHistory.push({role:"user",content:message},{role:"assistant",content:result.body?.reply||""});const assistant=appendChatMessage("assistant",result.body?.reply||"");if(result.body?.hasCorrection&&result.body?.correctedText){const box=document.createElement("div");box.className="chat-correction";const title=document.createElement("strong");title.textContent="Correção sugerida:";const corrected=document.createElement("p");corrected.textContent=result.body.correctedText;const explain=document.createElement("button");explain.className="secondary small-action";explain.type="button";explain.textContent="Explicar";const explanation=document.createElement("p");explanation.className="chat-result";explanation.hidden=true;explain.addEventListener("click",()=>chatAction(explain,"/api/v1/correct/explain",{originalText:message,correctedText:result.body.correctedText,language},explanation,"Gerando..."));box.append(title,corrected,explain,explanation);assistant.item.append(box);}const actions=document.createElement("div");actions.className="chat-actions";const translate=document.createElement("button");translate.className="secondary small-action";translate.type="button";translate.textContent="Traduzir";const translated=document.createElement("p");translated.className="chat-result";translated.hidden=true;translate.addEventListener("click",()=>chatAction(translate,"/api/v1/translate",{text:result.body.reply,sourceLanguage:language,targetLanguage:language==="en"?"pt":"en"},translated,"Traduzindo..."));actions.append(translate);assistant.item.append(actions,translated);const time=document.createElement("small");time.className="chat-time";time.textContent=`Respondido em ${((performance.now()-start)/1000).toFixed(1)} s`;assistant.item.append(time);}else{const failed=appendChatMessage("assistant",result.networkError?"Não foi possível conectar ao servidor.":result.sessionInvalid||result.response.status===401?"Sua sessão expirou. Entre novamente.":errorMessage(result.response.status));failed.item.classList.add("error");if(result.sessionInvalid||result.response.status===401)showLogin("Sua sessão expirou. Entre novamente.");}}catch(_){pending.item.remove();const failed=appendChatMessage("assistant","Não foi possível conectar ao servidor.");failed.item.classList.add("error");}finally{send.disabled=false;$("chat-messages").scrollTo({top:$("chat-messages").scrollHeight,behavior:"smooth"});}}async function sendChatStream(event){
+  event.preventDefault(); if($("send-chat").disabled)return;
+  const input=$("chat-message"), message=input.value, language=$("chat-language").value;
+  if(!message.trim())return setMessage("chat-status","Digite uma mensagem.");
+  if(message.length>5000)return setMessage("chat-status","A mensagem deve ter no máximo 5000 caracteres.");
+  const send=$("send-chat"); send.disabled=true; setMessage("chat-status");
+  appendChatMessage("user",message); input.value=""; $("chat-count").textContent="0";
+  const assistant=appendChatMessage("assistant",""); const start=performance.now(); let firstToken;
+  try{
+    const response=await authenticatedStream("/api/v1/chat/stream",{method:"POST",body:JSON.stringify({message,language,history:chatHistory.slice(-10)})});
+    if(!response.ok){assistant.item.classList.add("error"); assistant.bubble.textContent=response.status===503?"O serviço de IA está temporariamente indisponível.":response.status===429?"Muitas solicitações. Tente novamente em instantes.":response.status===400?"Verifique a mensagem e o idioma.":response.status===401?"Sua sessão expirou. Entre novamente.":"Não foi possível concluir a operação."; if(response.status===401)showLogin("Sua sessão expirou. Entre novamente."); return;}
+    const reader=response.body.getReader(), decoder=new TextDecoder(); let buffer="", eventName="", data="";
+    const dispatch=async()=>{if(!eventName)return; const value=data; if(eventName==="token"){let chunk;try{chunk=JSON.parse(value);}catch(_){assistant.item.classList.add("error");assistant.bubble.textContent="O serviço de IA está temporariamente indisponível.";eventName="";data="";return;}if(typeof chunk.text!=="string"){assistant.item.classList.add("error");assistant.bubble.textContent="O serviço de IA está temporariamente indisponível.";eventName="";data="";return;}if(firstToken===undefined)firstToken=performance.now(); assistant.bubble.textContent+=chunk.text;} else if(eventName==="complete"){let meta;try{meta=JSON.parse(value);}catch(_){assistant.item.classList.add("error");assistant.bubble.textContent="O serviço de IA está temporariamente indisponível.";eventName="";data="";return;} chatHistory.push({role:"user",content:message},{role:"assistant",content:assistant.bubble.textContent}); if(meta.hasCorrection&&meta.correctedText){const box=document.createElement("div");box.className="chat-correction";const title=document.createElement("strong");title.textContent="Correção sugerida:";const corrected=document.createElement("p");corrected.textContent=meta.correctedText;const explain=document.createElement("button");explain.className="secondary small-action";explain.type="button";explain.textContent="Explicar";const explanation=document.createElement("p");explanation.className="chat-result";explanation.hidden=true;explain.onclick=()=>chatAction(explain,"/api/v1/correct/explain",{originalText:message,correctedText:meta.correctedText,language},explanation,"Gerando...");box.append(title,corrected,explain,explanation);assistant.item.append(box);} const actions=document.createElement("div");actions.className="chat-actions";const translateButton=document.createElement("button");translateButton.className="secondary small-action";translateButton.type="button";translateButton.textContent="Traduzir";const translated=document.createElement("p");translated.className="chat-result";translated.hidden=true;translateButton.onclick=()=>chatAction(translateButton,"/api/v1/translate",{text:assistant.bubble.textContent,sourceLanguage:language,targetLanguage:language==="en"?"pt":"en"},translated,"Traduzindo...");actions.append(translateButton);assistant.item.append(actions,translated);const time=document.createElement("small");time.className="chat-time";time.textContent=`Primeira resposta: ${firstToken===undefined?"-":((firstToken-start)/1000).toFixed(1)} s · Total: ${((performance.now()-start)/1000).toFixed(1)} s`;assistant.item.append(time);} else if(eventName==="error"){assistant.item.classList.add("error");let errorMessageText="O serviço de IA está temporariamente indisponível.";try{const payload=JSON.parse(value);if(payload.message)errorMessageText=payload.message;}catch(_){}assistant.bubble.textContent=errorMessageText;}eventName="";data="";};
+    while(true){const part=await reader.read(); if(part.done)break; buffer+=decoder.decode(part.value,{stream:true}); const lines=buffer.split(/\r?\n/); buffer=lines.pop(); for(const line of lines){if(line.startsWith("event:"))eventName=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.startsWith("data: ")?line.slice(6):line.slice(5);else if(!line.trim())await dispatch();}}
+    if(buffer.trim()) { if(buffer.startsWith("data:"))data+=buffer.startsWith("data: ")?buffer.slice(6):buffer.slice(5); await dispatch(); }
+  }catch(_){assistant.item.classList.add("error");assistant.bubble.textContent="Não foi possível conectar ao servidor.";}finally{send.disabled=false;$("chat-messages").scrollTo({top:$("chat-messages").scrollHeight,behavior:"smooth"});}
+}const googleScript = document.createElement("script"); googleScript.src = "https://accounts.google.com/gsi/client"; googleScript.async = true; googleScript.onload = prepareGoogle; document.head.appendChild(googleScript); showHome();
 
-async function logout() {
-  const refreshToken = tokens().refreshToken;
-  try { if (refreshToken) await request("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }); }
-  finally { clearSession(); loginView.hidden = false; homeView.hidden = true; setMessage(""); }
-}
 
-$("login-form").addEventListener("submit", loginLocal); $("logout").addEventListener("click", logout);
-const googleScript = document.createElement("script"); googleScript.src = "https://accounts.google.com/gsi/client"; googleScript.async = true; googleScript.onload = prepareGoogle; document.head.appendChild(googleScript);
-showHome();
