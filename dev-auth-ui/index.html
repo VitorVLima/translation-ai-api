@@ -1,38 +1,29 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EnglishAI - Auth Dev UI</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EnglishAI Â· Development UI</title><link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="card">
-    <h1>EnglishAI</h1>
-    <section id="login-view">
-      <h2>Entrar</h2>
-      <form id="login-form">
-        <label for="email">Email</label>
-        <input id="email" name="email" type="email" autocomplete="username" required>
-        <label for="password">Senha</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required>
-        <button type="submit">Entrar</button>
-      </form>
-      <p class="separator">ou</p>
-      <div id="google-button"></div>
-      <p id="message" role="alert" aria-live="polite"></p>
+  <main class="shell">
+    <section id="login-view" class="login-layout">
+      <div class="brand-panel"><span class="eyebrow">DEVELOPMENT UI</span><h1>EnglishAI</h1><p>Teste autenticaÃ§Ã£o e ferramentas de linguagem em um sÃ³ lugar.</p></div>
+      <div class="login-card card"><h2>Entre na sua conta</h2><p class="muted">Use uma conta local ou Google.</p>
+        <form id="login-form"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required><label for="password">Senha</label><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">Entrar</button></form>
+        <div class="separator"><span>ou</span></div><div id="google-button"></div><p id="message" class="message" role="alert" aria-live="polite"></p>
+      </div>
     </section>
-    <section id="home-view" hidden>
-      <h2>Home</h2>
-      <p>Olá, <strong id="username"></strong></p>
-      <dl>
-        <dt>Email</dt><dd id="user-email"></dd>
-        <dt>Conta verificada</dt><dd id="verified"></dd>
-      </dl>
-      <button id="logout" type="button">Logout</button>
-      <p id="home-message" role="alert" aria-live="polite"></p>
+    <section id="app-view" hidden>
+      <header class="topbar"><div class="logo">English<span>AI</span><small>DEV</small></div><div class="user-chip"><span id="header-username"></span><button id="logout" class="text-button" type="button">Sair</button></div></header>
+      <div class="app-layout"><nav class="sidebar" aria-label="NavegaÃ§Ã£o"><button class="nav-item active" data-view="home">âŒ‚ <span>InÃ­cio</span></button><button class="nav-item" data-view="translate">â‡„ <span>Traduzir</span></button><button class="nav-item" data-view="correct">âœ“ <span>Corrigir</span></button><button class="nav-item" data-view="chat">☵ <span>Conversar</span></button><button class="nav-item" data-view="account">â—Ž <span>Conta</span></button></nav>
+        <div class="content">
+          <section id="view-home" class="page-view"><div class="page-heading"><span class="eyebrow">PAINEL</span><h2>OlÃ¡, <span id="username"></span></h2><p class="muted">Escolha uma ferramenta para comeÃ§ar.</p></div><p id="home-message" class="message" role="alert" aria-live="polite"></p><div class="feature-grid"><button class="feature-card" data-view="translate"><b>â‡„</b><strong>Traduzir</strong><span>Traduza textos entre portuguÃªs e inglÃªs.</span></button><button class="feature-card" data-view="correct"><b>âœ“</b><strong>Corrigir texto</strong><span>Melhore gramÃ¡tica, ortografia e pontuaÃ§Ã£o.</span></button><button class="feature-card" data-view="account"><b>â—Ž</b><strong>Minha conta</strong><span>Veja os dados da sessÃ£o atual.</span></button></div></section>
+          <section id="view-translate" class="page-view" hidden><div class="page-heading"><span class="eyebrow">FERRAMENTA</span><h2>Traduzir texto</h2><p class="muted">O processamento Ã© feito pelo backend EnglishAI.</p></div><div class="tool-card card"><label for="translation-text">Texto de entrada</label><textarea id="translation-text" maxlength="5000" rows="8" placeholder="Digite um texto para traduzir"></textarea><div class="field-meta"><small><span id="translation-count">0</span>/5000 caracteres</small></div><div class="language-row"><label>Origem<select id="source-language"><option value="pt">PortuguÃªs</option><option value="en">InglÃªs</option></select></label><button id="swap-languages" class="swap" type="button" aria-label="Inverter idiomas">â‡„</button><label>Destino<select id="target-language"><option value="en">InglÃªs</option><option value="pt">PortuguÃªs</option></select></label></div><button id="translate" class="primary action" type="button">Traduzir</button><p id="translation-status" class="message" role="status" aria-live="polite"></p><div class="result-block"><label for="translation-result">Resultado</label><textarea id="translation-result" rows="7" readonly></textarea></div></div></section>
+          <section id="view-correct" class="page-view" hidden><div class="page-heading"><span class="eyebrow">FERRAMENTA</span><h2>Corrigir texto</h2><p class="muted">Receba uma versÃ£o corrigida e, quando quiser, uma explicaÃ§Ã£o.</p></div><div class="tool-card card"><label for="correction-text">Texto original</label><textarea id="correction-text" maxlength="5000" rows="8" placeholder="I go to school yesterday"></textarea><div class="field-meta"><small><span id="correction-count">0</span>/5000 caracteres</small></div><label for="correction-language">Idioma<select id="correction-language"><option value="en">InglÃªs</option><option value="pt">PortuguÃªs</option></select></label><button id="correct" class="primary action" type="button">Corrigir</button><p id="correction-status" class="message" role="status" aria-live="polite"></p><div class="result-block"><label for="corrected-result">Texto corrigido</label><textarea id="corrected-result" rows="6" readonly></textarea><button id="explain-correction" class="secondary action" type="button" disabled>Explicar correÃ§Ã£o</button><p id="explanation-status" class="message" role="status" aria-live="polite"></p><div id="explanation-card" class="explanation-card" hidden><span class="eyebrow">EXPLICAÃ‡ÃƒO</span><p id="explanation-result"></p></div></div></div></section>
+          <section id="view-chat" class="page-view" hidden><div class="page-heading"><span class="eyebrow">PRÁTICA</span><h2>Conversar</h2><p class="muted">Pratique com o tutor. As mensagens ficam somente nesta página.</p></div><div class="chat-card card"><div class="chat-toolbar"><label for="chat-language">Idioma<select id="chat-language"><option value="en">English</option><option value="pt">Português</option></select></label><button id="clear-chat" class="secondary" type="button">Limpar conversa</button></div><div id="chat-messages" class="chat-messages" aria-live="polite"><div class="chat-welcome"><strong>EnglishAI</strong><span>Start a conversation to practice.</span></div></div><form id="chat-form" class="chat-composer"><textarea id="chat-message" maxlength="5000" rows="2" placeholder="Digite sua mensagem..." required></textarea><div class="composer-footer"><small><span id="chat-count">0</span>/5000</small><button id="send-chat" class="primary" type="submit">Enviar</button></div></form><p id="chat-status" class="message" role="status" aria-live="polite"></p></div></section><section id="view-account" class="page-view" hidden><div class="page-heading"><span class="eyebrow">PERFIL</span><h2>Minha conta</h2><p class="muted">InformaÃ§Ãµes retornadas por <code>/users/me</code>.</p></div><div class="account-card card"><dl><dt>Username</dt><dd id="account-username"></dd><dt>Email</dt><dd id="account-email"></dd><dt>Email verificado</dt><dd id="account-verified"></dd></dl><button id="account-logout" class="secondary" type="button">Sair da conta</button></div></section>
+        </div>
+      </div>
     </section>
-  </main>
-  <script src="app.js"></script>
-</body>
-</html>
+  </main><script src="app.js"></script>
+</body></html>
+
