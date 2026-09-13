@@ -5,6 +5,11 @@ spring:
   application:
     name: english-ai
 
+  servlet:
+    multipart:
+      max-file-size: ${STT_MAX_FILE_SIZE_MB:20}MB
+      max-request-size: ${STT_MAX_FILE_SIZE_MB:20}MB
+
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5434}/${POSTGRES_DB:mydatabase}
     username: ${POSTGRES_USER:myuser}
@@ -45,6 +50,22 @@ ai:
       model: ${GEMINI_MODEL:}
   translation:
     max-characters: ${AI_TRANSLATION_MAX_CHARACTERS:5000}
+
+speech:
+  stt:
+    provider: ${STT_PROVIDER:whisper}
+    connect-timeout-seconds: ${STT_CONNECT_TIMEOUT_SECONDS:5}
+    response-timeout-seconds: ${STT_RESPONSE_TIMEOUT_SECONDS:120}
+    max-file-size-mb: ${STT_MAX_FILE_SIZE_MB:20}
+    whisper:
+      base-url: ${WHISPER_BASE_URL:http://127.0.0.1:8001}
+  tts:
+    provider: ${TTS_PROVIDER:piper}
+    connect-timeout-seconds: ${TTS_CONNECT_TIMEOUT_SECONDS:5}
+    response-timeout-seconds: ${TTS_RESPONSE_TIMEOUT_SECONDS:60}
+    max-text-length: ${TTS_MAX_TEXT_LENGTH:3000}
+    piper:
+      base-url: ${PIPER_BASE_URL:http://127.0.0.1:8002}
 
 
 server:

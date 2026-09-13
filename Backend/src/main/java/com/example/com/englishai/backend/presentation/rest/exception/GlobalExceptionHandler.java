@@ -16,6 +16,11 @@ import org.springframework.http.HttpHeaders;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
 import com.example.com.englishai.backend.application.user.exception.UsernameAlreadyExistsException;
 import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
+import com.example.com.englishai.backend.application.stt.InvalidSpeechToTextRequestException;
+import com.example.com.englishai.backend.application.stt.SpeechToTextFileTooLargeException;
+import com.example.com.englishai.backend.application.stt.SpeechToTextProviderException;
+import com.example.com.englishai.backend.application.tts.InvalidTextToSpeechRequestException;
+import com.example.com.englishai.backend.application.tts.TextToSpeechProviderException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -27,6 +32,34 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(TextToSpeechProviderException.class)
+    public ResponseEntity<ErrorResponse> handleTextToSpeechProviderFailure(TextToSpeechProviderException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new ErrorResponse("Speech synthesis service temporarily unavailable"));
+    }
+
+    @ExceptionHandler(InvalidTextToSpeechRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidTextToSpeechRequest(InvalidTextToSpeechRequestException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid speech synthesis request"));
+    }
+
+    @ExceptionHandler(SpeechToTextProviderException.class)
+    public ResponseEntity<ErrorResponse> handleSpeechToTextProviderFailure(SpeechToTextProviderException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new ErrorResponse("Speech recognition service temporarily unavailable"));
+    }
+
+    @ExceptionHandler(InvalidSpeechToTextRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidSpeechToTextRequest(InvalidSpeechToTextRequestException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid speech-to-text request"));
+    }
+
+    @ExceptionHandler(SpeechToTextFileTooLargeException.class)
+    public ResponseEntity<ErrorResponse> handleSpeechToTextFileTooLarge(SpeechToTextFileTooLargeException exception) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(new ErrorResponse("Audio file is too large"));
+    }
 
     @ExceptionHandler(LlmProviderException.class)
     public ResponseEntity<ErrorResponse> handleLlmProviderFailure(LlmProviderException exception) {
