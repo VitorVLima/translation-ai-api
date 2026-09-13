@@ -1,5 +1,7 @@
 package com.example.com.englishai.backend.infrastructure.llm;
 
+import com.example.com.englishai.backend.infrastructure.metrics.AiMetrics;
+
 import com.example.com.englishai.backend.application.llm.*;
 import com.example.com.englishai.backend.application.ports.LlmProvider;
 import com.example.com.englishai.backend.application.ports.LlmStreamingProvider;
@@ -15,12 +17,24 @@ public final class OllamaLlmProvider implements LlmProvider, LlmStreamingProvide
         this.http = new HttpLlmClient(HttpClient.newBuilder().connectTimeout(connectTimeout).build(), responseTimeout);
     }
     @Override public LlmResponse complete(LlmRequest request) {
+        return AiMetrics.measure(AiMetrics.Operation.LLM_COMPLETE, AiMetrics.Provider.OLLAMA, () -> completeMeasured(request));
+    }
+    private LlmResponse completeMeasured(LlmRequest request) {
         String prompt = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
         String format = request.responseFormat() == LlmResponseFormat.JSON ? ",\"format\":\"json\"" : "";
         String json = "{\"model\":" + LlmJson.quote(model) + ",\"prompt\":" + LlmJson.quote(prompt) + ",\"stream\":false" + format + (request.temperature() == null ? "" : ",\"options\":{\"temperature\":" + request.temperature() + "}") + "}";
         return new LlmResponse(LlmJson.stringField(http.post(URI.create(baseUrl + "/api/generate"), json), "response"));
     }
     @Override public void stream(LlmRequest request, java.util.function.Consumer<String> onChunk) {
+        try (var metric = AiMetrics.start(AiMetrics.Operation.LLM_STREAM_TOTAL, AiMetrics.Provider.OLLAMA)) {
+            streamMeasured(request, chunk -> {
+                if (chunk != null && !chunk.isEmpty()) metric.first(AiMetrics.Operation.LLM_FIRST_CHUNK);
+                onChunk.accept(chunk);
+            });
+            metric.success();
+        }
+    }
+    private void streamMeasured(LlmRequest request, java.util.function.Consumer<String> onChunk) {
         String prompt = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
         String format = request.responseFormat() == com.example.com.englishai.backend.application.llm.LlmResponseFormat.JSON ? ",\"format\":\"json\"" : "";
         String json = "{\"model\":" + LlmJson.quote(model) + ",\"prompt\":" + LlmJson.quote(prompt) + ",\"stream\":true" + format + (request.temperature() == null ? "" : ",\"options\":{\"temperature\":" + request.temperature() + "}") + "}";

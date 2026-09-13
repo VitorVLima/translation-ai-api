@@ -1,0 +1,3 @@
+piper-service/.env
+voices/**/*.onnx
+voices/**/*.onnx.json

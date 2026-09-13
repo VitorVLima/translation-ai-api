@@ -1,29 +1,155 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EnglishAI Â· Development UI</title><link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#5155c9">
+  <title>EnglishAI — Seu espaço para aprender</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <a id="skip-link" class="skip-link" href="#login-form">Pular para o conteúdo</a>
   <main class="shell">
-    <section id="login-view" class="login-layout">
-      <div class="brand-panel"><span class="eyebrow">DEVELOPMENT UI</span><h1>EnglishAI</h1><p>Teste autenticaÃ§Ã£o e ferramentas de linguagem em um sÃ³ lugar.</p></div>
-      <div class="login-card card"><h2>Entre na sua conta</h2><p class="muted">Use uma conta local ou Google.</p>
-        <form id="login-form"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required><label for="password">Senha</label><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">Entrar</button></form>
-        <div class="separator"><span>ou</span></div><div id="google-button"></div><p id="message" class="message" role="alert" aria-live="polite"></p>
+    <section id="login-view" class="login-layout" aria-label="Entrar no EnglishAI">
+      <div class="brand-panel">
+        <div class="logo"><span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 5h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 3v-3a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z"/><path d="M8 10h8M8 14h5"/></svg></span><span>English<span class="brand-accent">AI</span></span></div>
+        <div class="brand-story">
+          <span class="eyebrow">PALAVRAS QUE ABREM CAMINHOS</span>
+          <h1>Mais confiança.<br>Uma conversa<br>de cada vez.</h1>
+          <p>Um espaço para praticar, experimentar e aprender inglês com a ajuda da IA.</p>
+          <div class="auth-preview" aria-hidden="true">
+            <div class="preview-label"><span class="mini-avatar">AI</span> EnglishAI</div>
+            <p>What would you like to talk about today?</p>
+            <span class="preview-answer">Let's talk about my day.</span>
+            <div class="preview-note"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg> Aprenda com cada conversa.</div>
+          </div>
+        </div>
+        <p class="brand-footer">Converse. Descubra. Vá mais longe.</p>
+      </div>
+      <div class="auth-main">
+        <div class="login-card card">
+          <span class="eyebrow">BOM TER VOCÊ AQUI</span>
+          <h2>Bem-vindo de volta.</h2>
+          <p class="muted">Entre para continuar sua jornada com o inglês.</p>
+          <form id="login-form" tabindex="-1">
+            <label for="email">E-mail</label>
+            <input id="email" type="email" autocomplete="username" placeholder="voce@exemplo.com" required>
+            <label for="password">Senha</label>
+            <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" required>
+            <button class="primary action" type="submit">Entrar</button>
+          </form>
+          <div class="separator"><span>ou continue com</span></div>
+          <div id="google-button"></div>
+          <p id="message" class="message" role="alert" aria-live="polite"></p>
+        </div>
+        <p class="auth-footnote">Seu próximo passo começa com uma conversa.</p>
       </div>
     </section>
+
     <section id="app-view" hidden>
-      <header class="topbar"><div class="logo">English<span>AI</span><small>DEV</small></div><div class="user-chip"><span id="header-username"></span><button id="logout" class="text-button" type="button">Sair</button></div></header>
-      <div class="app-layout"><nav class="sidebar" aria-label="NavegaÃ§Ã£o"><button class="nav-item active" data-view="home">âŒ‚ <span>InÃ­cio</span></button><button class="nav-item" data-view="translate">â‡„ <span>Traduzir</span></button><button class="nav-item" data-view="correct">âœ“ <span>Corrigir</span></button><button class="nav-item" data-view="chat">☵ <span>Conversar</span></button><button class="nav-item" data-view="account">â—Ž <span>Conta</span></button></nav>
-        <div class="content">
-          <section id="view-home" class="page-view"><div class="page-heading"><span class="eyebrow">PAINEL</span><h2>OlÃ¡, <span id="username"></span></h2><p class="muted">Escolha uma ferramenta para comeÃ§ar.</p></div><p id="home-message" class="message" role="alert" aria-live="polite"></p><div class="feature-grid"><button class="feature-card" data-view="translate"><b>â‡„</b><strong>Traduzir</strong><span>Traduza textos entre portuguÃªs e inglÃªs.</span></button><button class="feature-card" data-view="correct"><b>âœ“</b><strong>Corrigir texto</strong><span>Melhore gramÃ¡tica, ortografia e pontuaÃ§Ã£o.</span></button><button class="feature-card" data-view="account"><b>â—Ž</b><strong>Minha conta</strong><span>Veja os dados da sessÃ£o atual.</span></button></div></section>
-          <section id="view-translate" class="page-view" hidden><div class="page-heading"><span class="eyebrow">FERRAMENTA</span><h2>Traduzir texto</h2><p class="muted">O processamento Ã© feito pelo backend EnglishAI.</p></div><div class="tool-card card"><label for="translation-text">Texto de entrada</label><textarea id="translation-text" maxlength="5000" rows="8" placeholder="Digite um texto para traduzir"></textarea><div class="field-meta"><small><span id="translation-count">0</span>/5000 caracteres</small></div><div class="language-row"><label>Origem<select id="source-language"><option value="pt">PortuguÃªs</option><option value="en">InglÃªs</option></select></label><button id="swap-languages" class="swap" type="button" aria-label="Inverter idiomas">â‡„</button><label>Destino<select id="target-language"><option value="en">InglÃªs</option><option value="pt">PortuguÃªs</option></select></label></div><button id="translate" class="primary action" type="button">Traduzir</button><p id="translation-status" class="message" role="status" aria-live="polite"></p><div class="result-block"><label for="translation-result">Resultado</label><textarea id="translation-result" rows="7" readonly></textarea></div></div></section>
-          <section id="view-correct" class="page-view" hidden><div class="page-heading"><span class="eyebrow">FERRAMENTA</span><h2>Corrigir texto</h2><p class="muted">Receba uma versÃ£o corrigida e, quando quiser, uma explicaÃ§Ã£o.</p></div><div class="tool-card card"><label for="correction-text">Texto original</label><textarea id="correction-text" maxlength="5000" rows="8" placeholder="I go to school yesterday"></textarea><div class="field-meta"><small><span id="correction-count">0</span>/5000 caracteres</small></div><label for="correction-language">Idioma<select id="correction-language"><option value="en">InglÃªs</option><option value="pt">PortuguÃªs</option></select></label><button id="correct" class="primary action" type="button">Corrigir</button><p id="correction-status" class="message" role="status" aria-live="polite"></p><div class="result-block"><label for="corrected-result">Texto corrigido</label><textarea id="corrected-result" rows="6" readonly></textarea><button id="explain-correction" class="secondary action" type="button" disabled>Explicar correÃ§Ã£o</button><p id="explanation-status" class="message" role="status" aria-live="polite"></p><div id="explanation-card" class="explanation-card" hidden><span class="eyebrow">EXPLICAÃ‡ÃƒO</span><p id="explanation-result"></p></div></div></div></section>
-          <section id="view-chat" class="page-view" hidden><div class="page-heading"><span class="eyebrow">PRÁTICA</span><h2>Conversar</h2><p class="muted">Pratique com o tutor. As mensagens ficam somente nesta página.</p></div><div class="chat-card card"><div class="chat-toolbar"><label for="chat-language">Idioma<select id="chat-language"><option value="en">English</option><option value="pt">Português</option></select></label><button id="clear-chat" class="secondary" type="button">Limpar conversa</button></div><div id="chat-messages" class="chat-messages" aria-live="polite"><div class="chat-welcome"><strong>EnglishAI</strong><span>Start a conversation to practice.</span></div></div><form id="chat-form" class="chat-composer"><textarea id="chat-message" maxlength="5000" rows="2" placeholder="Digite sua mensagem..." required></textarea><div class="composer-footer"><small><span id="chat-count">0</span>/5000</small><button id="send-chat" class="primary" type="submit">Enviar</button></div></form><p id="chat-status" class="message" role="status" aria-live="polite"></p></div></section><section id="view-account" class="page-view" hidden><div class="page-heading"><span class="eyebrow">PERFIL</span><h2>Minha conta</h2><p class="muted">InformaÃ§Ãµes retornadas por <code>/users/me</code>.</p></div><div class="account-card card"><dl><dt>Username</dt><dd id="account-username"></dd><dt>Email</dt><dd id="account-email"></dd><dt>Email verificado</dt><dd id="account-verified"></dd></dl><button id="account-logout" class="secondary" type="button">Sair da conta</button></div></section>
+      <div class="app-layout">
+        <aside class="sidebar">
+          <div class="logo"><span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 5h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 3v-3a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z"/><path d="M8 10h8M8 14h5"/></svg></span><span>English<span class="brand-accent">AI</span></span></div>
+          <span class="nav-caption">SEU ESPAÇO</span>
+          <nav aria-label="Navegação principal">
+            <button class="nav-item active" data-view="home" type="button" aria-current="page" title="Início"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg><span>Início</span></button>
+            <button class="nav-item" data-view="chat" type="button" title="Conversar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/><path d="M7 10h10M7 14h6"/></svg><span>Conversar</span></button>
+            <button class="nav-item" data-view="translate" type="button" title="Traduzir"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 3v2M6 5c1 5 4 8 8 10M13 5c-1 5-5 9-10 11M14 21l4-10 4 10M15.5 17h5"/></svg><span>Traduzir</span></button>
+            <button class="nav-item" data-view="correct" type="button" title="Corrigir"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg><span>Corrigir</span></button>
+            <button class="nav-item" data-view="account" type="button" title="Conta"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span>Conta</span></button>
+          </nav>
+          <div class="sidebar-note"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg><strong>Um pouco todos os dias.</strong><p>Cada conversa é um passo a mais.</p></div>
+          <div class="sidebar-footer"><span class="status-dot"></span> Feito para o seu ritmo</div>
+        </aside>
+        <div class="workspace">
+          <header class="topbar">
+            <span class="mobile-wordmark">English<span class="brand-accent">AI</span></span>
+            <span class="topbar-caption">Seu espaço de aprendizado</span>
+            <div class="user-chip"><span class="account-avatar" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span><span id="header-username"></span><button id="logout" class="text-button" type="button" title="Sair da conta"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 3H4v18h5M9 12h12m-4-4 4 4-4 4"/></svg><span>Sair</span></button></div>
+          </header>
+          <div id="main-content" class="content" tabindex="-1">
+            <section id="view-home" class="page-view">
+              <div class="page-heading"><div><span class="eyebrow">UM NOVO PASSO, TODOS OS DIAS</span><h1>Olá, <span id="username"></span>.</h1><p class="muted">Que tal dar um pouco de espaço para o seu inglês hoje?</p></div></div>
+              <p id="home-message" class="message" role="alert" aria-live="polite"></p>
+              <div class="home-hero">
+                <div><span class="pill"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg> Seu tutor de idiomas</span><h2>O melhor jeito de aprender<br>é começar a conversar.</h2><p>Fale sobre o seu dia, pratique uma entrevista ou explore um assunto novo. No seu ritmo.</p><button class="primary" type="button" data-view="chat">Começar uma conversa <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></div>
+                <div class="hero-art" aria-hidden="true"><span class="art-orbit"></span><div class="art-chat"><span class="mini-avatar">AI</span><span>Let's talk.</span><i></i><i></i></div><div class="art-reply">One conversation.<br>New possibilities.</div></div>
+              </div>
+              <div class="section-heading"><h2>Explore suas palavras</h2><span class="muted">Ferramentas para ir além</span></div>
+              <div class="feature-grid">
+                <button class="feature-card" data-view="translate" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 3v2M6 5c1 5 4 8 8 10M13 5c-1 5-5 9-10 11M14 21l4-10 4 10M15.5 17h5"/></svg></b><strong>Encontre a palavra certa</strong><span>Traduza entre português e inglês com clareza.</span><span class="feature-link">Traduzir <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+                <button class="feature-card" data-view="correct" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg></b><strong>Aprenda com a escrita</strong><span>Revise uma frase e entenda como melhorar.</span><span class="feature-link">Corrigir <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+                <button class="feature-card" data-view="chat" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></b><strong>Dê voz ao seu inglês</strong><span>Escolha o modo Voz e pratique uma conversa.</span><span class="feature-link">Conversar <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+              </div>
+            </section>
+
+            <section id="view-chat" class="page-view" hidden>
+              <div class="page-heading"><div><span class="eyebrow">PRATIQUE DO SEU JEITO</span><h1>Conversar</h1><p class="muted">Um espaço para falar, aprender e ganhar confiança.</p></div><span class="pill tutor-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg> Tutor de idiomas</span></div>
+              <div class="chat-card card">
+                <div class="chat-toolbar">
+                  <label for="chat-language" class="chat-language-label">Idioma<select id="chat-language"><option value="en">English</option><option value="pt">Português</option></select></label>
+                  <div class="mode-control">
+                    <label class="visually-hidden" for="chat-mode">Modo de conversa</label>
+                    <select id="chat-mode" title="Modo de conversa" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="text" selected>Texto</option><option value="voice">Voz</option></select>
+                    <div class="segmented-control" role="group" aria-label="Modo de conversa">
+                      <button type="button" data-chat-mode="text" aria-pressed="true" title="Modo texto"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/><path d="M7 10h10M7 14h6"/></svg>Texto</button>
+                      <button type="button" data-chat-mode="voice" aria-pressed="false" title="Modo voz"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>Voz</button>
+                    </div>
+                  </div>
+                  <button id="clear-chat" class="text-button clear-chat" type="button" title="Limpar conversa"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg><span>Limpar</span></button>
+                </div>
+                <p id="voice-status" class="voice-status" role="status" aria-live="polite" hidden>Pronto para falar</p>
+                <div id="chat-messages" class="chat-messages" role="log" aria-label="Mensagens da conversa" aria-live="polite" aria-relevant="additions text"><div class="chat-welcome"><span class="tutor-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg></span><strong>Uma boa conversa começa aqui.</strong><p>Pratique no seu ritmo. O EnglishAI ajuda você a encontrar as palavras.</p><div class="conversation-prompts" aria-label="Ideias para conversar"><span>Tell me about your day.</span><span>Let's practice a job interview.</span><span>Help me feel more confident in English.</span></div><small>Digite uma mensagem ou escolha o modo Voz para falar.</small></div></div>
+                <form id="chat-form" class="chat-composer">
+                  <label for="chat-message" class="visually-hidden">Sua mensagem</label>
+                  <textarea id="chat-message" maxlength="5000" rows="2" placeholder="Sobre o que vamos conversar?" required></textarea>
+                  <div class="composer-footer">
+                    <small><span id="chat-count">0</span>/5000 <span class="keyboard-hint">· Enter para enviar</span></small>
+                    <div class="composer-actions"><button id="record-chat" class="secondary mic-button" type="button" title="Gravar mensagem" aria-label="Gravar mensagem">Microfone</button><button id="send-chat" class="primary" type="submit" title="Enviar mensagem"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 3 18 9-18 9 4-9-4-9Zm4 9h14"/></svg>Enviar</button></div>
+                  </div>
+                </form>
+                <p id="chat-status" class="message" role="status" aria-live="polite"></p>
+              </div>
+              <p class="chat-footnote">Um espaço para praticar, sem pressão. A IA também pode cometer erros.</p>
+            </section>
+
+            <section id="view-translate" class="page-view" hidden>
+              <div class="page-heading"><div><span class="eyebrow">ENTRE IDIOMAS, SEM BARREIRAS</span><h1>Traduzir</h1><p class="muted">Encontre uma nova forma de dizer o que você quer.</p></div></div>
+              <div class="tool-card card translation-tool">
+                <div class="language-row"><label for="source-language">Idioma de origem<select id="source-language"><option value="pt">Português</option><option value="en">Inglês</option></select></label><button id="swap-languages" class="swap" type="button" aria-label="Inverter idiomas" title="Inverter idiomas"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4"/></svg></button><label for="target-language">Idioma de destino<select id="target-language"><option value="en">Inglês</option><option value="pt">Português</option></select></label></div>
+                <div class="tool-columns">
+                  <div class="tool-input"><label for="translation-text">Seu texto</label><textarea id="translation-text" maxlength="5000" rows="9" placeholder="Escreva ou cole o texto que deseja traduzir."></textarea><div class="field-meta"><small><span id="translation-count">0</span>/5000 caracteres</small></div></div>
+                  <div class="result-block"><label for="translation-result">Tradução</label><textarea id="translation-result" rows="9" placeholder="Sua tradução aparece aqui." readonly></textarea><small class="result-hint">Novas palavras, o mesmo significado.</small></div>
+                </div>
+                <div class="tool-footer"><p id="translation-status" class="message" role="status" aria-live="polite"></p><button id="translate" class="primary action" type="button">Traduzir</button></div>
+              </div>
+            </section>
+
+            <section id="view-correct" class="page-view" hidden>
+              <div class="page-heading"><div><span class="eyebrow">ESCREVA COM MAIS CONFIANÇA</span><h1>Corrigir</h1><p class="muted">Uma nova versão da sua frase. Um novo aprendizado.</p></div></div>
+              <div class="tool-card card correction-tool">
+                <div class="tool-topline"><div><h2>Cada frase é uma oportunidade.</h2><p class="muted">Revise a escrita e descubra o porquê de cada ajuste.</p></div><label for="correction-language">Idioma<select id="correction-language"><option value="en">Inglês</option><option value="pt">Português</option></select></label></div>
+                <div class="tool-columns">
+                  <div class="tool-input"><label for="correction-text">Texto original</label><textarea id="correction-text" maxlength="5000" rows="8" placeholder="Digite uma frase para revisar. Ex.: I go to school yesterday."></textarea><div class="field-meta"><small><span id="correction-count">0</span>/5000 caracteres</small></div></div>
+                  <div class="result-block correction-result"><label for="corrected-result"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg> Texto corrigido</label><textarea id="corrected-result" rows="8" placeholder="Sua frase revisada aparece aqui." readonly></textarea><button id="explain-correction" class="secondary action" type="button" disabled>Explicar correção</button></div>
+                </div>
+                <div class="tool-footer"><p id="correction-status" class="message" role="status" aria-live="polite"></p><button id="correct" class="primary action" type="button">Corrigir</button></div>
+                <p id="explanation-status" class="message" role="status" aria-live="polite"></p>
+                <div id="explanation-card" class="explanation-card" hidden><h3>Entenda a correção</h3><p id="explanation-result"></p></div>
+              </div>
+            </section>
+
+            <section id="view-account" class="page-view" hidden>
+              <div class="page-heading"><div><span class="eyebrow">SEU PERFIL</span><h1>Minha conta</h1><p class="muted">Um lugar para suas informações.</p></div></div>
+              <div class="account-card card"><div class="account-heading"><span class="profile-avatar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span><div><h2 id="account-username"></h2><span class="muted">Seu perfil EnglishAI</span></div></div><dl><dt>Nome de usuário</dt><dd id="account-name"></dd><dt>E-mail</dt><dd id="account-email"></dd><dt>E-mail confirmado</dt><dd id="account-verified"></dd></dl><button id="account-logout" class="button-danger" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 3H4v18h5M9 12h12m-4-4 4 4-4 4"/></svg>Sair da conta</button></div>
+              <dl class="visually-hidden"><dt>E-mail</dt><dd id="user-email"></dd><dt>E-mail confirmado</dt><dd id="verified"></dd></dl>
+            </section>
+          </div>
         </div>
       </div>
     </section>
-  </main><script src="app.js"></script>
-</body></html>
-
+  </main>
+  <template id="chat-empty-template"><div class="chat-welcome"><span class="tutor-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg></span><strong>Uma boa conversa começa aqui.</strong><p>Pratique no seu ritmo. O EnglishAI ajuda você a encontrar as palavras.</p><div class="conversation-prompts" aria-label="Ideias para conversar"><span>Tell me about your day.</span><span>Let's practice a job interview.</span><span>Help me feel more confident in English.</span></div><small>Digite uma mensagem ou escolha o modo Voz para falar.</small></div></template>
+  <script src="app.js"></script>
+</body>
+</html>

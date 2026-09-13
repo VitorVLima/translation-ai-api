@@ -1,6 +1,8 @@
 package com.example.com.englishai.backend.presentation.rest.chat;
 
 import com.example.com.englishai.backend.application.chat.*;
+import com.example.com.englishai.backend.infrastructure.metrics.AiMetrics;
+import org.springframework.beans.factory.annotation.Value;
 import com.example.com.englishai.backend.application.translation.Language;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
@@ -17,6 +19,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/chat")
 public class ConversationController {
     private final ChatWithTutor chatWithTutor;
+    @Value("${ai.llm.provider:ollama}")
+    private String metricProvider = "unknown";
     public ConversationController(ChatWithTutor chatWithTutor) { this.chatWithTutor = chatWithTutor; }
     @PostMapping
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
@@ -29,13 +33,22 @@ public class ConversationController {
         chatWithTutor.validateRequest(command);
         if (!chatWithTutor.streamingAvailable()) throw new com.example.com.englishai.backend.application.llm.LlmProviderException("Streaming is not supported by the configured provider");
         var emitter = new SseEmitter(130_000L);
+        var metric = AiMetrics.start(AiMetrics.Operation.CHAT_TOTAL, AiMetrics.provider(metricProvider));
+        emitter.onTimeout(() -> metric.finish(AiMetrics.Status.TIMEOUT));
+        emitter.onError(error -> metric.finish(AiMetrics.Status.ERROR));
         CompletableFuture.runAsync(() -> {
             try {
-                var result = chatWithTutor.stream(command, chunk -> send(emitter, "token", "{\"text\":" + jsonString(chunk) + "}"));
+                var result = chatWithTutor.stream(command, chunk -> {
+                    send(emitter, "token", "{\"text\":" + jsonString(chunk) + "}");
+                    if (chunk != null && !chunk.isEmpty()) metric.first(AiMetrics.Operation.CHAT_FIRST_TOKEN);
+                });
                 send(emitter, "complete", "{\"hasCorrection\":" + result.hasCorrection() + ",\"correctedText\":" + jsonString(result.correctedText()) + "}");
                 emitter.complete();
+                metric.success();
             } catch (Exception exception) {
                 try { send(emitter, "error", "{\"message\":\"AI service temporarily unavailable\"}"); } finally { emitter.complete(); }
+            } finally {
+                metric.close();
             }
         });
         return emitter;
