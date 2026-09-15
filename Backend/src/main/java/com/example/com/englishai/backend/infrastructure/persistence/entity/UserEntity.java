@@ -1,12 +1,10 @@
 package com.example.com.englishai.backend.infrastructure.persistence.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import com.example.com.englishai.backend.domain.user.UserRole;
 
 @Entity
 @Table(name = "users")
@@ -32,6 +30,8 @@ public class UserEntity {
 
     @Column(name = "email_verified", nullable = false)
     private boolean emailVerified;
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16)
+    private UserRole role = UserRole.USER;
 
     protected UserEntity() {
     }
@@ -82,7 +82,15 @@ public class UserEntity {
         return updatedAt;
     }
 
+    public UserEntity(UUID id, String email, String username, String passwordHash,
+                      OffsetDateTime createdAt, OffsetDateTime updatedAt, boolean emailVerified, UserRole role) {
+        this(id, email, username, passwordHash, createdAt, updatedAt, emailVerified);
+        this.role = role == null ? UserRole.USER : role;
+    }
+
     public boolean isEmailVerified() { return emailVerified; }
+    public UserRole getRole() { return role; }
+    public void setRole(UserRole role) { this.role = role == null ? UserRole.USER : role; }
 
     @Override
     public String toString() {

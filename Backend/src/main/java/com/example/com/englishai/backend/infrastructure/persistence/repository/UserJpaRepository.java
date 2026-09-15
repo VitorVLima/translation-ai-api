@@ -9,6 +9,7 @@ import jakarta.persistence.LockModeType;
 
 import java.util.Optional;
 import java.util.UUID;
+import com.example.com.englishai.backend.domain.user.UserRole;
 
 public interface UserJpaRepository extends JpaRepository<UserEntity, UUID> {
 
@@ -17,6 +18,8 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, UUID> {
     boolean existsByUsername(String username);
 
     Optional<UserEntity> findByEmail(String email);
+
+    long countByRole(UserRole role);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from UserEntity u where u.email = :email")

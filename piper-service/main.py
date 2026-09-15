@@ -8,6 +8,7 @@ import os
 import subprocess
 import tempfile
 import shutil
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -25,6 +26,7 @@ logging.basicConfig(level=os.getenv("PIPER_LOG_LEVEL", "INFO"))
 
 MAX_TEXT_LENGTH = int(os.getenv("PIPER_MAX_TEXT_LENGTH", "3000"))
 SYNTHESIS_TIMEOUT = float(os.getenv("PIPER_SYNTHESIS_TIMEOUT_SECONDS", "30"))
+WARMUP_ENABLED = os.getenv("PIPER_WARMUP_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class PiperSynthesisError(RuntimeError):
@@ -120,6 +122,25 @@ def get_synthesizer() -> Synthesizer:
     if _synthesizer is None:
         _synthesizer = PiperSynthesizer()
     return _synthesizer
+
+
+def warmup() -> None:
+    """Optionally initialize both Piper voices once during service startup."""
+    if not WARMUP_ENABLED:
+        return
+    started = time.perf_counter()
+    synthesizer = get_synthesizer()
+    for language, phrase in (("en", "Ready."), ("pt", "Pronto.")):
+        try:
+            synthesizer.synthesize(phrase, language)
+            logger.info("AI_WARMUP service=piper language=%s status=success duration_ms=%d", language, int((time.perf_counter() - started) * 1000))
+        except Exception:
+            logger.error("AI_WARMUP service=piper language=%s status=error duration_ms=%d", language, int((time.perf_counter() - started) * 1000))
+
+
+@app.on_event("startup")
+def startup_warmup() -> None:
+    warmup()
 
 
 @app.get("/health")

@@ -68,7 +68,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.email").value("user@test.com"))
                 .andExpect(jsonPath("$.username").value("test-user"))
                 .andExpect(jsonPath("$.createdAt").value("2026-09-09T12:00:00Z"))
-                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$.length()").value(5))
                 .andExpect(jsonPath("$.password").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
                 .andExpect(cookie().doesNotExist("JSESSIONID"))

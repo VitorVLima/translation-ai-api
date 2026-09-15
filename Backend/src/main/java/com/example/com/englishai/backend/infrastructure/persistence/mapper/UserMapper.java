@@ -15,7 +15,7 @@ public class UserMapper {
                 entity.getPasswordHash(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt(),
-                entity.isEmailVerified()
+                entity.isEmailVerified(), entity.getRole()
         );
     }
 
@@ -27,7 +27,7 @@ public class UserMapper {
                 user.getPasswordHash(),
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
-                user.isEmailVerified()
+                user.isEmailVerified(), user.getRole()
         );
     }
 }

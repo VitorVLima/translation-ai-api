@@ -93,7 +93,7 @@ class AuthControllerLoginTest {
                 .andExpect(jsonPath("$.user.email").value("user@test.com"))
                 .andExpect(jsonPath("$.user.username").value("test-user"))
                 .andExpect(jsonPath("$.user.createdAt").value("2026-09-09T12:00:00Z"))
-                .andExpect(jsonPath("$.user.length()").value(4))
+                .andExpect(jsonPath("$.user.length()").value(5))
                 .andExpect(jsonPath("$.accessToken").value("test-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("test-refresh-token"))
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())

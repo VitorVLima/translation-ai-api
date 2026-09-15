@@ -25,6 +25,7 @@ O serviço carrega explicitamente o `.env` ao lado de `main.py`, antes de ler as
 | `PIPER_MAX_TEXT_LENGTH` | `3000` | Limite de caracteres |
 | `PIPER_SYNTHESIS_TIMEOUT_SECONDS` | `30` | Timeout da síntese em segundos |
 | `PIPER_EN_LENGTH_SCALE` | `1.0` | Escala de duração aplicada somente ao inglês |
+| `PIPER_WARMUP_ENABLED` | `false` | Sintetiza uma frase neutra de cada voz no startup |
 | `PIPER_LOG_LEVEL` | `INFO` | Nível de logs |
 
 Mantenha as vozes existentes e os respectivos `.onnx.json` juntos. Esta configuração não exige baixar ou substituir modelos.

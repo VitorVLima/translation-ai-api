@@ -23,6 +23,32 @@ def test_health():
     assert TestClient(main.app).get("/health").json() == {"status": "ok"}
 
 
+def test_preload_disabled_keeps_model_lazy(monkeypatch):
+    called = []
+    monkeypatch.setattr(main, "PRELOAD_MODEL", False)
+    monkeypatch.setattr(main, "get_model", lambda: called.append(True))
+    main.preload_model()
+    assert called == []
+
+
+def test_preload_enabled_loads_model_once(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="whisper-service")
+    called = []
+    monkeypatch.setattr(main, "PRELOAD_MODEL", True)
+    monkeypatch.setattr(main, "get_model", lambda: called.append(True))
+    main.preload_model()
+    assert called == [True]
+    assert "AI_WARMUP service=whisper status=success" in caplog.text
+
+
+def test_preload_failure_is_logged_and_does_not_escape(monkeypatch, caplog):
+    monkeypatch.setattr(main, "PRELOAD_MODEL", True)
+    monkeypatch.setattr(main, "get_model", lambda: (_ for _ in ()).throw(RuntimeError("private path")))
+    main.preload_model()
+    assert "AI_WARMUP service=whisper status=error" in caplog.text
+    assert "private path" not in caplog.text
+
+
 def test_valid_file_returns_text_and_language(monkeypatch):
     monkeypatch.setattr(main, "get_model", lambda: FakeTranscriber())
     response = TestClient(main.app).post("/transcribe", files={"file": ("voice.wav", b"audio", "audio/wav")})
