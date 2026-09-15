@@ -92,6 +92,61 @@ class LlmProviderAdapterTest {
         assertThatThrownBy(() -> provider.complete(new LlmRequest(null, "hello", null)))
                 .isInstanceOf(LlmProviderException.class);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void structuredConversationUsesNativeRolesForEitherProvider(boolean gemini) throws Exception {
+        server.removeContext("/");
+        var path = new AtomicReference<String>();
+        server.createContext("/", exchange -> {
+            path.set(exchange.getRequestURI().getPath());
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = (gemini
+                    ? "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"answer\"}]}}]}"
+                    : "{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length); exchange.getResponseBody().write(response); exchange.close();
+        });
+        com.example.com.englishai.backend.application.ports.LlmProvider provider = gemini
+                ? new GeminiLlmProvider("test-key", "gemini", baseUrl(), Duration.ofSeconds(1), Duration.ofSeconds(2))
+                : new OllamaLlmProvider(baseUrl(), "llama", Duration.ofSeconds(1), Duration.ofSeconds(2));
+        var request = structuredRequest();
+        assertThat(provider.complete(request).content()).isEqualTo("answer");
+        assertNativeRoles(body.get(), gemini);
+        assertThat(path.get()).contains(gemini ? "generateContent" : "/api/chat");
+        var chunks = new ArrayList<String>();
+        ((com.example.com.englishai.backend.application.ports.LlmStreamingProvider) provider).stream(request,chunks::add);
+        assertThat(chunks).containsExactly("answer");
+        assertNativeRoles(body.get(), gemini);
+        assertThat(path.get()).contains(gemini ? "streamGenerateContent" : "/api/chat");
+        provider.complete(new LlmRequest("opening-system", "Begin the configured conversation.", null,
+                LlmResponseFormat.JSON, java.util.List.of()));
+        assertThat(body.get()).contains("opening-system", "Begin the configured conversation.")
+                .doesNotContain("historic-assistant");
+    }
+
+    private LlmRequest structuredRequest() {
+        return new LlmRequest("trusted-system", "current-user", 0.2, LlmResponseFormat.JSON, java.util.List.of(
+                new com.example.com.englishai.backend.application.chat.ChatHistoryMessage(
+                        com.example.com.englishai.backend.application.chat.ChatRole.USER,"historic-user"),
+                new com.example.com.englishai.backend.application.chat.ChatHistoryMessage(
+                        com.example.com.englishai.backend.application.chat.ChatRole.ASSISTANT,"historic-assistant")));
+    }
+
+    private void assertNativeRoles(String json, boolean gemini) {
+        if (gemini) {
+            assertThat(json).contains("\"systemInstruction\":{\"parts\":[{\"text\":\"trusted-system\"}]}",
+                    "\"role\":\"user\",\"parts\":[{\"text\":\"historic-user\"}]",
+                    "\"role\":\"model\",\"parts\":[{\"text\":\"historic-assistant\"}]",
+                    "\"responseMimeType\":\"application/json\"");
+        } else {
+            assertThat(json).contains("\"role\":\"system\",\"content\":\"trusted-system\"",
+                    "\"role\":\"user\",\"content\":\"historic-user\"",
+                    "\"role\":\"assistant\",\"content\":\"historic-assistant\"");
+        }
+        assertThat(json.indexOf("historic-user")).isLessThan(json.indexOf("historic-assistant"));
+        assertThat(json.indexOf("historic-assistant")).isLessThan(json.indexOf("current-user"));
+    }
+
     private String baseUrl() { return "http://127.0.0.1:" + server.getAddress().getPort(); }
 }
 

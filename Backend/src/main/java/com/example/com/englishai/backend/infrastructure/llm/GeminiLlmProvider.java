@@ -27,8 +27,7 @@ public final class GeminiLlmProvider implements LlmProvider, LlmStreamingProvide
         return AiMetrics.measure(AiMetrics.Operation.LLM_COMPLETE, AiMetrics.Provider.GEMINI, () -> completeMeasured(request));
     }
     private LlmResponse completeMeasured(LlmRequest request) {
-        String text = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
-        String json = "{\"contents\":[{\"parts\":[{\"text\":" + LlmJson.quote(text) + "}]}]}";
+        String json = payload(request);
         return new LlmResponse(LlmJson.stringField(http.post(URI.create(endpoint), json), "text"));
     }
     @Override public void stream(LlmRequest request, java.util.function.Consumer<String> onChunk) {
@@ -41,13 +40,32 @@ public final class GeminiLlmProvider implements LlmProvider, LlmStreamingProvide
         }
     }
     private void streamMeasured(LlmRequest request, java.util.function.Consumer<String> onChunk) {
-        String text = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
-        String json = "{\"contents\":[{\"parts\":[{\"text\":" + LlmJson.quote(text) + "}]}]}";
+        String json = payload(request);
         String streamEndpoint = endpoint.replace(":generateContent?key=", ":streamGenerateContent?alt=sse&key=");
         http.stream(URI.create(streamEndpoint), json, line -> {
             String payload = line.startsWith("data:") ? line.substring(5).trim() : line.trim();
             if (!payload.isEmpty() && !payload.equals("[DONE]")) onChunk.accept(LlmJson.stringField(payload, "text"));
         });
+    }
+    private String payload(LlmRequest request) {
+        var contents = new java.util.ArrayList<String>();
+        if (request.history() != null) {
+            for (var message : request.history())
+                contents.add(content(message.role() == com.example.com.englishai.backend.application.chat.ChatRole.ASSISTANT
+                        ? "model" : "user", message.content()));
+        }
+        contents.add(content("user", request.userPrompt()));
+        String system = request.systemPrompt() == null || request.systemPrompt().isBlank() ? ""
+                : "\"systemInstruction\":{\"parts\":[{\"text\":" + LlmJson.quote(request.systemPrompt()) + "}]},";
+        var config = new java.util.ArrayList<String>();
+        if (request.responseFormat() == LlmResponseFormat.JSON) config.add("\"responseMimeType\":\"application/json\"");
+        if (request.temperature() != null) config.add("\"temperature\":" + request.temperature());
+        return "{" + system + "\"contents\":[" + String.join(",", contents) + "]"
+                + (config.isEmpty() ? "" : ",\"generationConfig\":{" + String.join(",", config) + "}") + "}";
+    }
+
+    private String content(String role, String text) {
+        return "{\"role\":" + LlmJson.quote(role) + ",\"parts\":[{\"text\":" + LlmJson.quote(text) + "}]}";
     }
     @Override public String toString() { return "GeminiLlmProvider[configured=true]"; }
 }

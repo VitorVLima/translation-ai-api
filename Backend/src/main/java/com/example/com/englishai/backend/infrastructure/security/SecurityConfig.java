@@ -18,6 +18,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import java.util.Arrays;
 import java.util.List;
 import jakarta.servlet.DispatcherType;
+import com.example.com.englishai.backend.infrastructure.persistence.repository.UserJpaRepository;
 
 @Configuration
 @EnableWebSecurity
@@ -25,11 +26,11 @@ public class SecurityConfig {
 
     @Bean
     CorsConfigurationSource corsConfigurationSource(
-            @Value("${APP_CORS_ALLOWED_ORIGINS:http://localhost:5500}") String allowedOrigins) {
+            @Value("${APP_CORS_ALLOWED_ORIGINS:http://localhost:5500,http://localhost:5501}") String allowedOrigins) {
         var configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
-        configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Content-Type", "Authorization"));
         configuration.setAllowCredentials(false);
         var source = new UrlBasedCorsConfigurationSource();
@@ -41,7 +42,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             AuthenticationTokenValidator tokenValidator,
-            ObjectProvider<AuthenticationRateLimitFilter> rateLimitFilter
+            ObjectProvider<AuthenticationRateLimitFilter> rateLimitFilter,
+            ObjectProvider<UserJpaRepository> users
     ) throws Exception {
 
         var entryPoint = new UnauthorizedEntryPoint();
@@ -49,9 +51,8 @@ public class SecurityConfig {
 
         http
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
-                // Nossa API será stateless.
-                // Não vamos usar sessão HTTP.
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS
@@ -59,12 +60,14 @@ public class SecurityConfig {
                 )
 
                 // Como estamos criando uma API REST,
-                // não precisamos de CSRF baseado em sessão.
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> {})
 
-                // Regras de autorização
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // Catalog images are non-sensitive bytes loaded by <img>; browsers cannot
+                        // attach the Bearer token from sessionStorage to that request.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/avatars/*/image").permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(
                                 HttpMethod.POST,
@@ -89,7 +92,9 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 );
 
+        users.ifAvailable(repo -> http.addFilterAfter(new AdminAuthorizationFilter(repo), JwtAuthenticationFilter.class));
         rateLimitFilter.ifAvailable(filter -> http.addFilterBefore(filter, JwtAuthenticationFilter.class));
         return http.build();
     }
 }
+

@@ -20,6 +20,7 @@ logging.basicConfig(level=os.getenv("WHISPER_LOG_LEVEL", "INFO"))
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
 MAX_FILE_SIZE = int(os.getenv("WHISPER_MAX_FILE_SIZE_MB", "20")) * 1024 * 1024
+PRELOAD_MODEL = os.getenv("WHISPER_PRELOAD_MODEL", "false").strip().lower() in {"1", "true", "yes", "on"}
 _MISSING_LANGUAGE = "__automatic_detection__"
 
 
@@ -46,6 +47,19 @@ def get_model() -> Transcriber:
                 )
                 logger.info("WHISPER_MODEL_READY")
     return _model
+
+
+def preload_model() -> None:
+    """Optionally load Whisper during startup without transcribing audio."""
+    if not PRELOAD_MODEL:
+        return
+    import time
+    started = time.perf_counter()
+    try:
+        get_model()
+        logger.info("AI_WARMUP service=whisper status=success duration_ms=%d", int((time.perf_counter() - started) * 1000))
+    except Exception:
+        logger.error("AI_WARMUP service=whisper status=error duration_ms=%d", int((time.perf_counter() - started) * 1000))
 
 
 def transcribe_path(path: str, language: str | None = None, transcriber: Transcriber | None = None) -> dict[str, str]:
@@ -88,6 +102,11 @@ async def save_upload(file: UploadFile) -> str:
 
 
 app = FastAPI(title="EnglishAI Whisper Service")
+
+
+@app.on_event("startup")
+def startup_preload() -> None:
+    preload_model()
 
 
 @app.get("/health")

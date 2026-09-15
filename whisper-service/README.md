@@ -26,6 +26,7 @@ O serviço carrega o `.env` ao lado de `main.py`, independentemente do diretóri
 | `WHISPER_DEVICE` | `cpu` | Dispositivo de inferência |
 | `WHISPER_COMPUTE_TYPE` | `int8` | Tipo de computação |
 | `WHISPER_MAX_FILE_SIZE_MB` | `20` | Limite do upload em MB |
+| `WHISPER_PRELOAD_MODEL` | `false` | Carrega o modelo no startup, sem transcrever |
 | `WHISPER_LOG_LEVEL` | `INFO` | Nível de logs |
 
 Depois de configurado, basta iniciar no Prompt de Comando (CMD):

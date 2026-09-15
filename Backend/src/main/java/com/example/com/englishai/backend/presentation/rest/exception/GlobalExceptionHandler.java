@@ -21,6 +21,7 @@ import com.example.com.englishai.backend.application.stt.SpeechToTextFileTooLarg
 import com.example.com.englishai.backend.application.stt.SpeechToTextProviderException;
 import com.example.com.englishai.backend.application.tts.InvalidTextToSpeechRequestException;
 import com.example.com.englishai.backend.application.tts.TextToSpeechProviderException;
+import com.example.com.englishai.backend.application.profile.InvalidProfileRequestException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -29,9 +30,30 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(NoSuchElementException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Resource not found"));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidState(IllegalStateException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Operation is not available"));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid request"));
+    }
+
+    @ExceptionHandler(InvalidProfileRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidProfile(InvalidProfileRequestException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("Invalid profile request"));
+    }
 
     @ExceptionHandler(TextToSpeechProviderException.class)
     public ResponseEntity<ErrorResponse> handleTextToSpeechProviderFailure(TextToSpeechProviderException exception) {

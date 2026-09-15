@@ -18,7 +18,7 @@ python -m http.server 5500
 ## Funcionalidades existentes
 
 - **Início:** atalhos para conversar, traduzir e corrigir.
-- **Conversar:** resposta progressiva via `POST /api/v1/chat/stream` (SSE), contexto das últimas 10 mensagens, correção sugerida e ações independentes Explicar, Traduzir e Ouvir.
+- **Conversar:** persistent chat via `POST /api/v1/conversations/{id}/messages/stream`, opened only after loading a scenario-linked conversation and its Backend history.
 - **Texto (padrão):** o microfone envia áudio a `POST /api/v1/transcriptions`; a transcrição preenche o campo para revisão. Envio e reprodução são manuais.
 - **Voz:** gravação explícita → STT completo → chat SSE → reply completa → `POST /api/v1/speech` → reprodução automática. O idioma selecionado (`en` ou `pt`) é mantido durante o turno. Não há escuta contínua nem nova gravação automática.
 - **Traduzir:** português ↔ inglês, inversão dos idiomas, limite de 5.000 caracteres e resultado em painel separado.
@@ -43,7 +43,7 @@ A auditoria encontrou sequências de ícones previamente interpretadas em um enc
 
 Tokens permanecem somente no `sessionStorage` da aba. Requisições autenticadas mantêm a tentativa única de refresh e repetição após 401. O Google usa nonce novo a cada preparação.
 
-Histórico é mantido somente em memória com texto do usuário e reply final do tutor. Correções, explicações, traduções, Blobs e URLs de áudio não entram no contexto. Não há persistência de áudio nem logs de tokens ou conteúdo das conversas.
+Conversation history is persisted in the Backend; the UI renders GET detail and does not send client history as the source of truth. Audio stays transient and no conversation content or tokens are logged.
 
 A reprodução é única. Limpar, sair da tela, mudar de modo, fazer logout ou descarregar a página cancela o pipeline e limpa os recursos. Iniciar uma gravação para a reprodução anterior. Falhas de TTS preservam a reply textual.
 
@@ -56,3 +56,25 @@ node --check dev-auth-ui/app.js
 ```
 
 Revise login/Google/logout/refresh, tradução nos dois sentidos, correção/explicação, chat SSE/multi-turn, Ouvir/Parar, STT manual e modo Voz. Confira também estados vazios, erros, cancelamentos, teclado, movimento reduzido e layouts de 375 a 1920 px. Testes com serviços simulados não substituem a validação real do microfone, reprodução e autenticação.
+
+## Scenario-required conversation flow
+
+- Home: Comecar uma conversa opens Scenarios, without creating anything.
+- Conversar: without a loaded conversation, redirects to Scenarios.
+- Scenarios: explicit selection -> POST creation/opening -> GET detail -> Chat.
+- Conversations: GET existing detail -> original scenario/history -> Chat, without POST.
+- Nova conversa: clears temporary selection and opens Scenarios; does not delete stored history.
+- Leaving chat or logging out clears currentConversation and cancels pending UI work. Late responses cannot reopen it.
+- F5/authenticated startup: Scenarios. This SPA has no conversation URL or stored selection; reopen through Conversations.
+- FREE_TALK is available only when explicitly selected.
+
+`appState.currentConversation` holds the validated Backend response. The chat language follows that response. The scenario catalog defines the assistant name/avatar; names such as Layla or Rodrigo are not hardcoded. Legacy standalone chat is no longer selected by this UI.
+
+Automated navigation checks (full script with fake DOM and HTTP):
+
+```bash
+node --check dev-auth-ui/app.js
+node --test dev-auth-ui/navigation.test.cjs
+```
+
+These checks cover real app handlers and state transitions; they do not replace live browser, audio or real-model validation. If creation succeeds but detail retrieval fails, reopen through Conversations rather than creating repeatedly. POST still has no idempotency key.

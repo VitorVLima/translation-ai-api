@@ -36,6 +36,32 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+def test_warmup_disabled_does_not_synthesize(monkeypatch):
+    fake = FakeSynthesizer()
+    monkeypatch.setattr(main, "_synthesizer", fake)
+    monkeypatch.setattr(main, "WARMUP_ENABLED", False)
+    main.warmup()
+    assert fake.calls == []
+
+
+def test_warmup_enabled_synthesizes_each_voice_once(monkeypatch):
+    fake = FakeSynthesizer()
+    monkeypatch.setattr(main, "_synthesizer", fake)
+    monkeypatch.setattr(main, "WARMUP_ENABLED", True)
+    main.warmup()
+    assert fake.calls == [("Ready.", "en"), ("Pronto.", "pt")]
+
+
+def test_warmup_failure_is_logged_and_does_not_escape(monkeypatch, caplog):
+    fake = FakeSynthesizer()
+    fake.error = main.PiperSynthesisError("private")
+    monkeypatch.setattr(main, "_synthesizer", fake)
+    monkeypatch.setattr(main, "WARMUP_ENABLED", True)
+    main.warmup()
+    assert "AI_WARMUP service=piper language=en status=error" in caplog.text
+    assert "private" not in caplog.text
+
+
 @pytest.mark.parametrize("language", ["en", "pt"])
 def test_synthesis_returns_wav_and_preserves_language(fake, language):
     response = TestClient(main.app).post("/synthesize", json={"text": "Hello", "language": language})

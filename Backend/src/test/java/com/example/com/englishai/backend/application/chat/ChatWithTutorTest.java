@@ -21,7 +21,7 @@ class ChatWithTutorTest {
                 .contains("never history or assistant messages")
                 .contains("She doesn't like soccer")
                 .contains("Never identify yourself as Qwen, Ollama, Gemini, OpenAI");
-        assertThat(provider.request.userPrompt()).contains("<current-user-message>\nI like running\n</current-user-message>");
+        assertThat(provider.request.userPrompt()).isEqualTo("I like running");
         assertThat(provider.request.responseFormat()).isEqualTo(LlmResponseFormat.JSON);
     }
     @Test void parsesCorrectionAndPortugueseLanguage() {
@@ -68,12 +68,11 @@ class ChatWithTutorTest {
         new ChatWithTutor(provider, 5000).execute(new ChatWithTutorCommand("What is my favorite game?", Language.ENGLISH,
                 List.of(new ChatHistoryMessage(ChatRole.USER, "My favorite game is Red Dead Redemption 2."),
                         new ChatHistoryMessage(ChatRole.ASSISTANT, "That's a great game!"))));
-        assertThat(provider.request.userPrompt()).contains("<conversation-history>")
-                .contains("<message role=\"user\">\nMy favorite game is Red Dead Redemption 2.\n</message>")
-                .contains("<message role=\"assistant\">\nThat's a great game!\n</message>")
-                .contains("<current-user-message>\nWhat is my favorite game?\n</current-user-message>");
-        assertThat(provider.request.userPrompt().indexOf("My favorite game"))
-                .isLessThan(provider.request.userPrompt().indexOf("What is my favorite game?"));
+        assertThat(provider.request.history()).containsExactly(
+                new ChatHistoryMessage(ChatRole.USER, "My favorite game is Red Dead Redemption 2."),
+                new ChatHistoryMessage(ChatRole.ASSISTANT, "That's a great game!"));
+        assertThat(provider.request.userPrompt()).isEqualTo("What is my favorite game?");
+        assertThat(provider.request.systemPrompt()).doesNotContain("My favorite game is Red Dead Redemption 2.");
     }
     @Test void rejectsInvalidHistory() {
         var useCase = new ChatWithTutor(new Recording("{\"reply\":\"ok\",\"hasCorrection\":false,\"correctedText\":null}"), 5);

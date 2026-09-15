@@ -48,7 +48,8 @@
 
     <section id="app-view" hidden>
       <div class="app-layout">
-        <aside class="sidebar">
+        <aside class="sidebar" id="app-sidebar" aria-label="Navegação principal">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Recolher menu" aria-expanded="true" title="Recolher menu"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6M8 12h12"/></svg></button>
           <div class="logo"><span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 5h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 3v-3a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z"/><path d="M8 10h8M8 14h5"/></svg></span><span>English<span class="brand-accent">AI</span></span></div>
           <span class="nav-caption">SEU ESPAÇO</span>
           <nav aria-label="Navegação principal">
@@ -85,7 +86,7 @@
 
             <section id="view-chat" class="page-view" hidden>
               <div class="page-heading"><div><span class="eyebrow">PRATIQUE DO SEU JEITO</span><h1>Conversar</h1><p class="muted">Um espaço para falar, aprender e ganhar confiança.</p></div><span class="pill tutor-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg> Tutor de idiomas</span></div>
-              <div class="chat-card card">
+              <div class="chat-card card"><div id="chat-assistant" class="chat-assistant" hidden><span id="chat-assistant-avatar-slot" class="chat-assistant-avatar-slot"></span><div><strong id="chat-assistant-name"></strong><span id="chat-assistant-description" class="muted"></span></div></div>
                 <div class="chat-toolbar">
                   <label for="chat-language" class="chat-language-label">Idioma<select id="chat-language"><option value="en">English</option><option value="pt">Português</option></select></label>
                   <div class="mode-control">
@@ -139,6 +140,9 @@
               </div>
             </section>
 
+            <section id="view-scenarios" class="page-view" hidden><div class="page-heading"><h1>Cenários</h1></div><div id="scenario-list" class="feature-grid"></div><p id="scenario-status" class="message" role="status"></p></section>
+            <section id="view-conversations" class="page-view" hidden><div class="page-heading"><h1>Conversas</h1></div><div id="conversation-list" class="feature-grid"></div><p id="conversation-status" class="message" role="status"></p></section>
+            <section id="view-profile" class="page-view" hidden><div class="page-heading"><h1>Perfil</h1></div><p id="profile-status" class="message" role="status"></p><div id="profile-summary"><strong id="profile-summary-name"></strong><span id="profile-summary-age"></span><span id="profile-summary-level"></span><span id="profile-summary-goal"></span><p id="profile-onboarding"></p></div><button id="profile-edit-button" type="button">Editar perfil</button><div id="profile-edit-panel" hidden><form id="profile-form"><input id="profile-name"><input id="profile-age"><select id="profile-level"></select><input id="profile-goal"><button id="profile-cancel-button" type="button">Cancelar</button></form><div id="avatar-grid"></div></div></section>
             <section id="view-account" class="page-view" hidden>
               <div class="page-heading"><div><span class="eyebrow">SEU PERFIL</span><h1>Minha conta</h1><p class="muted">Um lugar para suas informações.</p></div></div>
               <div class="account-card card"><div class="account-heading"><span class="profile-avatar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span><div><h2 id="account-username"></h2><span class="muted">Seu perfil EnglishAI</span></div></div><dl><dt>Nome de usuário</dt><dd id="account-name"></dd><dt>E-mail</dt><dd id="account-email"></dd><dt>E-mail confirmado</dt><dd id="account-verified"></dd></dl><button id="account-logout" class="button-danger" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 3H4v18h5M9 12h12m-4-4 4 4-4 4"/></svg>Sair da conta</button></div>

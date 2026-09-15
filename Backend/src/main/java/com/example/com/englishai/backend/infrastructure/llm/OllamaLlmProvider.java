@@ -20,10 +20,8 @@ public final class OllamaLlmProvider implements LlmProvider, LlmStreamingProvide
         return AiMetrics.measure(AiMetrics.Operation.LLM_COMPLETE, AiMetrics.Provider.OLLAMA, () -> completeMeasured(request));
     }
     private LlmResponse completeMeasured(LlmRequest request) {
-        String prompt = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
-        String format = request.responseFormat() == LlmResponseFormat.JSON ? ",\"format\":\"json\"" : "";
-        String json = "{\"model\":" + LlmJson.quote(model) + ",\"prompt\":" + LlmJson.quote(prompt) + ",\"stream\":false" + format + (request.temperature() == null ? "" : ",\"options\":{\"temperature\":" + request.temperature() + "}") + "}";
-        return new LlmResponse(LlmJson.stringField(http.post(URI.create(baseUrl + "/api/generate"), json), "response"));
+        String response = http.post(URI.create(baseUrl + (request.history() == null ? "/api/generate" : "/api/chat")), payload(request, false));
+        return new LlmResponse(LlmJson.stringField(response, request.history() == null ? "response" : "content"));
     }
     @Override public void stream(LlmRequest request, java.util.function.Consumer<String> onChunk) {
         try (var metric = AiMetrics.start(AiMetrics.Operation.LLM_STREAM_TOTAL, AiMetrics.Provider.OLLAMA)) {
@@ -35,9 +33,29 @@ public final class OllamaLlmProvider implements LlmProvider, LlmStreamingProvide
         }
     }
     private void streamMeasured(LlmRequest request, java.util.function.Consumer<String> onChunk) {
-        String prompt = (request.systemPrompt() == null || request.systemPrompt().isBlank() ? "" : request.systemPrompt() + "\n\n") + request.userPrompt();
-        String format = request.responseFormat() == com.example.com.englishai.backend.application.llm.LlmResponseFormat.JSON ? ",\"format\":\"json\"" : "";
-        String json = "{\"model\":" + LlmJson.quote(model) + ",\"prompt\":" + LlmJson.quote(prompt) + ",\"stream\":true" + format + (request.temperature() == null ? "" : ",\"options\":{\"temperature\":" + request.temperature() + "}") + "}";
-        http.stream(URI.create(baseUrl + "/api/generate"), json, line -> onChunk.accept(LlmJson.stringField(line, "response")));
+        http.stream(URI.create(baseUrl + (request.history() == null ? "/api/generate" : "/api/chat")), payload(request, true),
+                line -> onChunk.accept(LlmJson.stringField(line, request.history() == null ? "response" : "content")));
     }
+    private String payload(LlmRequest request, boolean stream) {
+        String input;
+        if (request.history() == null) {
+            input = "\"prompt\":" + LlmJson.quote(request.userPrompt())
+                    + (request.systemPrompt() == null ? "" : ",\"system\":" + LlmJson.quote(request.systemPrompt()));
+        } else {
+            var messages = new java.util.ArrayList<String>();
+            if (request.systemPrompt() != null && !request.systemPrompt().isBlank())
+                messages.add(message("system", request.systemPrompt()));
+            for (var message : request.history()) messages.add(message(message.role().code(), message.content()));
+            messages.add(message("user", request.userPrompt()));
+            input = "\"messages\":[" + String.join(",", messages) + "]";
+        }
+        return "{\"model\":" + LlmJson.quote(model) + "," + input + ",\"stream\":" + stream
+                + (request.responseFormat() == LlmResponseFormat.JSON ? ",\"format\":\"json\"" : "")
+                + (request.temperature() == null ? "" : ",\"options\":{\"temperature\":" + request.temperature() + "}") + "}";
+    }
+
+    private String message(String role, String content) {
+        return "{\"role\":" + LlmJson.quote(role) + ",\"content\":" + LlmJson.quote(content) + "}";
+    }
+
 }
