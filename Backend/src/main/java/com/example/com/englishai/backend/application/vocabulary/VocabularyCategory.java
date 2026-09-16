@@ -1,0 +1,7 @@
+package com.example.com.englishai.backend.application.vocabulary;
+
+public enum VocabularyCategory {
+    HOUSE, WORK, TRANSPORT, FOOD, CLOTHES, BODY, FAMILY, COUNTRIES, NATIONALITIES,
+    COLORS, NUMBERS, COMMON_ADJECTIVES, COMMON_VERBS, TECHNOLOGY, TRAVEL, RESTAURANT,
+    SCHOOL, SHOPPING, HEALTH, LEISURE
+}

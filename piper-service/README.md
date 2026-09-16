@@ -32,7 +32,9 @@ Mantenha as vozes existentes e os respectivos `.onnx.json` juntos. Esta configur
 
 `PIPER_EN_LENGTH_SCALE=1.0` mantém a velocidade normal; `PIPER_EN_LENGTH_SCALE=1.2` deixa a voz inglesa mais lenta. Valores maiores produzem fala mais lenta. O projeto aceita números finitos entre **0.5 e 2.0**, inclusive. Configuração inválida impede a execução inglesa, registra somente um código operacional seguro e retorna o erro público genérico existente. Português não recebe esse argumento e mantém a velocidade atual da voz.
 
-O valor é passado como `--length-scale` somente para `language=en`. O request HTTP continua contendo apenas `text` e `language`; o Spring não precisa conhecer essa configuração.
+O valor é passado como `--length-scale` para inglês. Requests antigos com apenas `text` e `language` preservam esse comportamento. Requests podem também informar `voice` (chave pública do modelo) e `speechRate` (0.75–1.25, padrão 1.0). O serviço converte a velocidade em duração: `length_scale = escala atual do idioma / speechRate`. Português usa base 1.0 e só recebe o argumento quando a velocidade muda. O Spring e o navegador não conhecem `length_scale`.
+
+`GET /voices` retorna somente `key`, `displayName` e `language` para os modelos configurados e outros `.onnx` com prefixo `en_`/`pt_` nos mesmos diretórios, acompanhados de `.onnx.json`. Nenhum caminho é retornado. A síntese resolve chaves contra essa lista; caminhos fornecidos por clientes são rejeitados. Voz de outro idioma usa o modelo padrão do idioma solicitado. Uma voz selecionada que deixou de estar disponível causa erro genérico, sem revelar detalhes internos. O navegador acessa somente o Spring, que protege o catálogo com ADMIN/SUPER_ADMIN.
 
 Depois de configurado, basta iniciar no Prompt de Comando (CMD):
 

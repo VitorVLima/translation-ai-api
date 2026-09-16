@@ -12,11 +12,15 @@ public class SynthesizeSpeech {
     }
 
     public SynthesizeSpeechResult execute(SynthesizeSpeechCommand command) {
+        return execute(command, SpeechSettings.DEFAULT);
+    }
+
+    public SynthesizeSpeechResult execute(SynthesizeSpeechCommand command, SpeechSettings settings) {
         if (command == null || command.text() == null || command.text().isBlank() || command.language() == null)
             throw new InvalidTextToSpeechRequestException("Invalid speech synthesis request");
         if (command.text().length() > maxTextLength)
             throw new InvalidTextToSpeechRequestException("Text exceeds maximum length");
-        TextToSpeechResult result = provider.synthesize(new TextToSpeechRequest(command.text(), command.language()));
+        TextToSpeechResult result = provider.synthesize(new TextToSpeechRequest(command.text(), command.language(), settings));
         if (result == null || result.audio() == null || result.audio().length == 0 || result.contentType() == null || result.contentType().isBlank())
             throw new TextToSpeechProviderException("Speech synthesis provider returned an invalid response");
         return new SynthesizeSpeechResult(result.audio(), result.contentType());

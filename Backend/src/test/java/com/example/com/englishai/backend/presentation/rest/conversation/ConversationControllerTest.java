@@ -50,6 +50,27 @@ class ConversationControllerTest {
         verify(service).create(owner,"JOB_INTERVIEW","en");
     }
 
+    @Test void creationAcceptsControlledDifficultyAndReturnsIt() throws Exception {
+        var owner = UUID.randomUUID();
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.create(owner, "JOB_INTERVIEW", "en", "BEGINNER")).thenReturn(new ConversationEntity(UUID.randomUUID(), owner,
+                "JOB_INTERVIEW", "en", "Interview", OffsetDateTime.now(), com.example.com.englishai.backend.application.conversation.ConversationDifficulty.BEGINNER));
+        mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\",\"difficulty\":\"BEGINNER\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.difficulty").value("BEGINNER"));
+        verify(service).create(owner, "JOB_INTERVIEW", "en", "BEGINNER");
+    }
+
+    @Test void invalidDifficultyIsRejectedBeforeService() throws Exception {
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(UUID.randomUUID());
+        mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\",\"difficulty\":\"EXPERT\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
     @Test void foreignIdsReturn404ForReadSendStreamAndDelete() throws Exception {
         var owner = UUID.randomUUID(); var foreignId = UUID.randomUUID();
         when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
@@ -71,6 +92,15 @@ class ConversationControllerTest {
                 .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\"}"))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(service);
+    }
+
+    @Test void limitUsesExistingErrorShapeAndConflictStatus() throws Exception {
+        var owner = UUID.randomUUID();
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.create(owner, "JOB_INTERVIEW", "en")).thenThrow(new com.example.com.englishai.backend.application.conversation.ConversationLimitReachedException());
+        mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("You can have at most 3 conversations."));
     }
 
     @Test void openingProviderFailureReturnsRecoverable503() throws Exception {
@@ -116,6 +146,16 @@ class ConversationControllerTest {
                 .andExpect(jsonPath("$.messages[0].role").value("ASSISTANT"))
                 .andExpect(jsonPath("$.messages[0].content").value("Welcome to the interview."));
         verify(service,never()).create(any(),anyString(),anyString());
+    }
+
+    @Test void reopenReturnsPersistedDifficulty() throws Exception {
+        var owner = UUID.randomUUID(); var id = UUID.randomUUID(); var now = OffsetDateTime.now();
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.require(owner, id)).thenReturn(new ConversationEntity(id, owner, "JOB_INTERVIEW", "en", "Interview", now,
+                com.example.com.englishai.backend.application.conversation.ConversationDifficulty.ADVANCED));
+        when(service.history(owner, id)).thenReturn(List.of());
+        mvc.perform(get("/api/v1/conversations/" + id).header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.conversation.difficulty").value("ADVANCED"));
     }
 
     @Test void orphanedScenarioCannotBeDisplayedAsFreeTalk() throws Exception {

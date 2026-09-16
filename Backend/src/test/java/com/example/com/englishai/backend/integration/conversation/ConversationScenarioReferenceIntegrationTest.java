@@ -41,6 +41,23 @@ class ConversationScenarioReferenceIntegrationTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test void speechSettingsPersistAndExistingScenariosHaveSafeDefaults() {
+        var defaultScenario = scenarios.findByScenarioKey("FREE_TALK").orElseThrow();
+        assertThat(defaultScenario.getSpeechRate()).isBetween(0.75, 1.25);
+        String key = "VOICE_" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
+        var scenario = new ConversationScenarioDefinitionEntity(UUID.randomUUID(), key, "Voice test", "Practice", "Legacy", "tutor_default", "Behavior", true, 0, OffsetDateTime.now());
+        assertThat(scenario.getTtsVoice()).isNull();
+        assertThat(scenario.getSpeechRate()).isEqualTo(1.0);
+        scenario.updateSpeech("en_US-lessac-high", 0.85);
+        scenarios.saveAndFlush(scenario);
+        entityManager.clear();
+        var stored = scenarios.findById(scenario.getId()).orElseThrow();
+        assertThat(stored.getTtsVoice()).isEqualTo("en_US-lessac-high");
+        assertThat(stored.getSpeechRate()).isEqualTo(0.85);
+        assertThat(stored.getBehaviorInstructions()).isEqualTo("Behavior");
+        assertThat(stored.getAssistantAvatarKey()).isEqualTo("tutor_default");
+    }
+
     @Test void fullLengthCatalogKeyAndExplicitFreeTalkRemainValid() {
         var owner = user(); var now = OffsetDateTime.now();
         String key = "CUSTOM_" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT) + "X".repeat(25);

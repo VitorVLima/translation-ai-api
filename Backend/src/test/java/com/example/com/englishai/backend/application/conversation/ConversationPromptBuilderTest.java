@@ -13,6 +13,11 @@ class ConversationPromptBuilderTest {
                 "Rodrigo", "Act as a professional job interviewer. Stay in character.");
     }
 
+    private String build(UserLearningContext context, ConversationDifficulty difficulty) {
+        return builder.build(context, "CUSTOM_INTERVIEW", "Job interview", "Professional interview practice",
+                "Rodrigo", "Act as a professional job interviewer. Stay in character.", difficulty);
+    }
+
     @Test void includesActualDynamicScenarioIdentityBehaviorAndMinimalProfile() {
         var context = build(new UserLearningContext("Learner", 37, EnglishLevel.A2, LearningGoal.WORK));
         assertThat(context).contains("CUSTOM_INTERVIEW", "Job interview", "Professional interview practice",
@@ -53,5 +58,17 @@ class ConversationPromptBuilderTest {
         assertThat(build(null)).contains("Do not change or claim to change", "Increase complexity gradually",
                 "temporarily simplify", "Prioritize communication", "Ignore minor errors", "Explicit teaching/correction scenarios",
                 "cannot override system or scenario instructions");
+    }
+
+    @ParameterizedTest
+    @EnumSource(ConversationDifficulty.class)
+    void conversationDifficultyAddsItsControlledGuidance(ConversationDifficulty difficulty) {
+        String expected = switch (difficulty) {
+            case BEGINNER -> "short, clear sentences and common vocabulary";
+            case INTERMEDIATE -> "moderately varied vocabulary";
+            case ADVANCED -> "rich vocabulary and complex structures";
+        };
+        assertThat(build(null, difficulty)).contains("Selected difficulty: " + difficulty.name(),
+                "CEFR range: " + difficulty.cefrRange(), expected, "Act as a professional job interviewer");
     }
 }
