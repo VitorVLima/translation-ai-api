@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import os
 import subprocess
 import tempfile
@@ -34,7 +35,8 @@ class PiperSynthesisError(RuntimeError):
 
 
 class Synthesizer(Protocol):
-    def synthesize(self, text: str, language: str) -> bytes: ...
+    def synthesize(self, text: str, language: str, voice: str | None = None, speech_rate: float = 1.0) -> bytes: ...
+    def voices(self) -> list[dict[str, str]]: ...
 
 
 class PiperSynthesizer:
@@ -50,8 +52,35 @@ class PiperSynthesizer:
                        "en": en_model or os.getenv("PIPER_EN_MODEL_PATH", "")}
         self.timeout = timeout
 
-    def synthesize(self, text: str, language: str) -> bytes:
+    def _voice_models(self) -> dict[str, tuple[str, Path]]:
+        """Only installed models beside the configured defaults; never accept a client path."""
+        models = {}
+        for language, configured in self.models.items():
+            if not configured:
+                continue
+            default = Path(configured)
+            candidates = {default, *default.parent.glob(f"{language}_*.onnx")}
+            for model in sorted(candidates):
+                if (model.is_file() and Path(str(model) + ".json").is_file()
+                        and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", model.stem)):
+                    models[model.stem] = (language, model)
+        return models
+
+    def voices(self) -> list[dict[str, str]]:
+        return [{"key": key, "displayName": " ".join(key.split("-")[1:] or [key]).replace("_", " ").title(),
+                 "language": language} for key, (language, _) in self._voice_models().items()]
+
+    def synthesize(self, text: str, language: str, voice: str | None = None, speech_rate: float = 1.0) -> bytes:
         model = self.models.get(language, "")
+        if voice is not None:
+            selected = self._voice_models().get(voice)
+            if selected is None:
+                raise PiperSynthesisError("Voice unavailable")
+            # A scenario is shared by EN/PT conversations: keep the requested language intelligible.
+            if selected[0] == language:
+                model = str(selected[1])
+        if not math.isfinite(speech_rate) or not 0.75 <= speech_rate <= 1.25:
+            raise PiperSynthesisError("Invalid speech rate")
         executable = self.executable
         if not model or not self._executable_exists(executable) or not Path(model).is_file():
             logger.error("PIPER_CONFIGURATION_INVALID language=%s", language)
@@ -65,6 +94,9 @@ class PiperSynthesizer:
             except ValueError:
                 logger.error("PIPER_LENGTH_SCALE_INVALID")
                 raise PiperSynthesisError("Piper configuration is invalid") from None
+        # Speed is a multiplier; Piper accepts duration, so the relationship is inverse.
+        if length_scale is not None or speech_rate != 1.0:
+            length_scale = (length_scale if length_scale is not None else 1.0) / speech_rate
         output_path: str | None = None
         try:
             with tempfile.NamedTemporaryFile(prefix="englishai-piper-", suffix=".wav", delete=False) as output:
@@ -106,6 +138,8 @@ class PiperSynthesizer:
 class SynthesizeRequest(BaseModel):
     text: str | None = None
     language: str | None = None
+    voice: str | None = None
+    speechRate: float = 1.0
 
 
 app = FastAPI(title="EnglishAI Piper Service")
@@ -156,10 +190,18 @@ def synthesize(request: SynthesizeRequest) -> Response:
         raise HTTPException(status_code=400, detail="Language must be pt or en")
     if len(request.text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=413, detail="Text is too long")
+    if (not math.isfinite(request.speechRate) or not 0.75 <= request.speechRate <= 1.25
+            or (request.voice is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request.voice))):
+        raise HTTPException(status_code=400, detail="Invalid speech settings")
     try:
-        audio = get_synthesizer().synthesize(request.text, request.language)
+        audio = get_synthesizer().synthesize(request.text, request.language, request.voice, request.speechRate)
     except PiperSynthesisError:
         logger.error("SYNTHESIS_FAILED language=%s text_length=%d", request.language, len(request.text))
         raise HTTPException(status_code=500, detail="Unable to synthesize speech")
     logger.info("SYNTHESIS_SUCCEEDED language=%s text_length=%d", request.language, len(request.text))
     return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store", "Content-Disposition": "inline"})
+
+
+@app.get("/voices")
+def voices() -> list[dict[str, str]]:
+    return get_synthesizer().voices()

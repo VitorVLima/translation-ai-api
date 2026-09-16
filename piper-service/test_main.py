@@ -15,7 +15,7 @@ class FakeSynthesizer:
         self.calls = []
         self.error = None
 
-    def synthesize(self, text, language):
+    def synthesize(self, text, language, voice=None, speech_rate=1.0):
         self.calls.append((text, language))
         if self.error:
             raise self.error
@@ -224,3 +224,59 @@ def test_temporary_audio_removed_on_failure(monkeypatch, configured_piper, failu
     assert response.status_code == 500
     assert response.json() == {"detail": "Unable to synthesize speech"}
     assert paths and all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("language,rate", [("en", 0.75), ("en", 1.0), ("en", 1.25), ("pt", 0.75), ("pt", 1.25)])
+def test_scenario_speed_is_converted_to_duration_only_in_piper(monkeypatch, configured_piper, language, rate):
+    monkeypatch.setenv("PIPER_EN_LENGTH_SCALE", "1.2")
+
+    def run(command, **kwargs):
+        scale = float(command[command.index("--length-scale") + 1])
+        assert scale == pytest.approx((1.2 if language == "en" else 1.0) / rate)
+        Path(command[-1]).write_bytes(b"RIFFwav")
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(main.subprocess, "run", run)
+    response = TestClient(main.app).post("/synthesize", json={"text": "Hello", "language": language, "speechRate": rate})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("rate", [0.74, 1.26, 0, -1, "NaN", "Infinity"])
+def test_invalid_scenario_rate_is_rejected_before_synthesis(fake, rate):
+    response = TestClient(main.app).post("/synthesize", json={"text": "Hello", "language": "en", "speechRate": rate})
+    assert response.status_code == 400
+    assert fake.calls == []
+
+
+def test_voice_catalog_only_exposes_installed_models_and_synthesis_resolves_keys(monkeypatch, tmp_path):
+    en = tmp_path / "en_US-lessac-high.onnx"
+    pt = tmp_path / "pt_BR-faber-medium.onnx"
+    alternate = tmp_path / "en_US-test-medium.onnx"
+    for path in (en, pt, alternate):
+        path.touch()
+        Path(str(path) + ".json").write_text("{}")
+    (tmp_path / "en_US-incomplete.onnx").touch()
+    engine = main.PiperSynthesizer("piper", str(pt), str(en), 5)
+    monkeypatch.setattr(main, "_synthesizer", engine)
+    monkeypatch.setattr(main.shutil, "which", lambda _: "piper")
+    client = TestClient(main.app)
+    catalog = client.get("/voices")
+    assert catalog.status_code == 200
+    assert {voice["key"] for voice in catalog.json()} == {en.stem, pt.stem, alternate.stem}
+    assert all(set(voice) == {"key", "displayName", "language"} for voice in catalog.json())
+    assert str(tmp_path) not in catalog.text
+    models = []
+
+    def run(command, **kwargs):
+        models.append(command[command.index("--model") + 1])
+        Path(command[-1]).write_bytes(b"RIFFwav")
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(main.subprocess, "run", run)
+    assert client.post("/synthesize", json={"text": "Hello", "language": "en", "voice": alternate.stem}).status_code == 200
+    # The same scenario in PT uses the configured Portuguese default, not an English model.
+    assert client.post("/synthesize", json={"text": "Olá", "language": "pt", "voice": alternate.stem}).status_code == 200
+    assert models == [str(alternate), str(pt)]
+    assert client.post("/synthesize", json={"text": "Hello", "language": "en", "voice": "unknown"}).status_code == 500
+    assert client.post("/synthesize", json={"text": "Hello", "language": "en", "voice": "../private/model"}).status_code == 400
+    assert len(models) == 2

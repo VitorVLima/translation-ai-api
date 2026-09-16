@@ -18,12 +18,12 @@ public class CorrectionController {
     @PostMapping
     public ResponseEntity<CorrectionResponse> correct(@Valid @RequestBody CorrectionRequest request) {
         var result = correctText.execute(new CorrectTextCommand(request.text(), Language.fromCode(request.language())));
-        return ResponseEntity.ok().header("Cache-Control", "no-store").body(new CorrectionResponse(result.correctedText()));
+        return ResponseEntity.ok().header("Cache-Control", "no-store").body(new CorrectionResponse(result.correctedText(), result.status(), result.explanation(), result.usageTip(), result.alternatives(), result.examples()));
     }
 
     public record CorrectionRequest(
             @NotBlank(message = "Text is required") String text,
-            @NotBlank(message = "Language is required") @Pattern(regexp = "(?i)pt|en", message = "Unsupported language") String language) {}
+            @NotBlank(message = "Language is required") @Pattern(regexp = "(?i)en", message = "Correction supports English only") String language) {}
 
-    public record CorrectionResponse(String correctedText) {}
+    public record CorrectionResponse(String correctedText, com.example.com.englishai.backend.application.translation.CorrectionStatus status, String explanation, String usageTip, java.util.List<String> alternatives, java.util.List<com.example.com.englishai.backend.application.translation.CorrectionExample> examples) {}
 }

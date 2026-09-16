@@ -35,6 +35,11 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(com.example.com.englishai.backend.application.conversation.ConversationLimitReachedException.class)
+    public ResponseEntity<ErrorResponse> handleConversationLimit(com.example.com.englishai.backend.application.conversation.ConversationLimitReachedException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(exception.getMessage()));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(NoSuchElementException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Resource not found"));
@@ -94,6 +99,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidTranslationRequest(InvalidTranslationRequestException exception) {
         return ResponseEntity.badRequest().body(new ErrorResponse("Invalid translation request"));
     }
+
 
     @ExceptionHandler(InvalidCorrectionRequestException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCorrectionRequest(InvalidCorrectionRequestException exception) {

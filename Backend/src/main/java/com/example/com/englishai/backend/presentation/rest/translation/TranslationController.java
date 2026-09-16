@@ -20,7 +20,7 @@ public class TranslationController {
     public ResponseEntity<TranslationResponse> translate(@Valid @RequestBody TranslationRequest request) {
         var result = translateText.execute(new TranslateTextCommand(request.text(),
                 Language.fromCode(request.sourceLanguage()), Language.fromCode(request.targetLanguage())));
-        return ResponseEntity.ok().header("Cache-Control", "no-store").body(new TranslationResponse(result.translation()));
+        return ResponseEntity.ok().header("Cache-Control", "no-store").body(new TranslationResponse(result.translation(), result.enrichment()));
     }
 
     public record TranslationRequest(
@@ -28,5 +28,5 @@ public class TranslationController {
             @NotBlank(message = "Source language is required") @Pattern(regexp = "(?i)pt|en", message = "Unsupported language") String sourceLanguage,
             @NotBlank(message = "Target language is required") @Pattern(regexp = "(?i)pt|en", message = "Unsupported language") String targetLanguage) {}
 
-    public record TranslationResponse(String translation) {}
+    public record TranslationResponse(String translation, com.example.com.englishai.backend.application.translation.TranslationEnrichment enrichment) {}
 }

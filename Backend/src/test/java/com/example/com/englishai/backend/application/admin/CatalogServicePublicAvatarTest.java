@@ -15,7 +15,7 @@ class CatalogServicePublicAvatarTest {
    new com.example.com.englishai.backend.infrastructure.persistence.entity.PredefinedAvatarEntity(UUID.randomUUID(),"avatar_01","One","one",true,1,now),
    new com.example.com.englishai.backend.infrastructure.persistence.entity.PredefinedAvatarEntity(UUID.randomUUID(),"avatar_default","Default","default",true,0,now),
    new com.example.com.englishai.backend.infrastructure.persistence.entity.PredefinedAvatarEntity(UUID.randomUUID(),"interviewer_default","Interviewer","interviewer",true,2,now)));
-  var result=new CatalogService(repo,scenarios).publicAvatars();
+  var result=new CatalogService(repo,scenarios,org.mockito.Mockito.mock(com.example.com.englishai.backend.application.ports.TextToSpeechProvider.class)).publicAvatars();
   assertThat(result).extracting("avatarKey").containsExactly("avatar_01");
  }
 }

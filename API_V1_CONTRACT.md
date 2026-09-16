@@ -1,8 +1,37 @@
 # EnglishAI API v1 — Contrato para clientes mobile
 
-Status: revisão de contrato, sem alteração de endpoints ou DTOs.
+Status: revisão de contrato; extensões aditivas de TTS e cenários descritas abaixo.
+
+## Atualização: limite de conversas e voz por cenário
+
+- `POST /api/v1/conversations`: máximo de três conversas por usuário, garantido no Backend. Com três ou mais retorna **409** `{"message":"You can have at most 3 conversations."}` antes da LLM. Exclusão libera vaga. A gravação revalida o limite sob bloqueio por usuário; chamadas simultâneas podem gerar aberturas concorrentes, mas não ultrapassam o limite persistido. O request aceita `difficulty` controlado (`BEGINNER`, `INTERMEDIATE`, `ADVANCED`), com `INTERMEDIATE` como padrão.
+- `POST /api/v1/speech`: preserva `text` e `language` e aceita `conversationId` opcional. Com id, exige ownership (404 para conversa alheia/inexistente) e usa idioma persistido e configurações atuais do cenário. Sem id, mantém o TTS genérico de Tradução/Correção. Sucesso continua WAV com `no-store`.
+- `GET /api/v1/admin/tts/voices`: ADMIN/SUPER_ADMIN; retorna `[{"key":"en_US-lessac-high","displayName":"Lessac High","language":"en"}, ...]` com modelos disponíveis, sem caminhos. Provider indisponível retorna o erro TTS 503 existente.
+- Requests/responses administrativos de cenário acrescentam `ttsVoice` e `speechRate`. Velocidade aceita **0.75–1.25**; padrão **1.0**. Voz ausente/nula na edição preserva o valor existente; `""` volta ao padrão do idioma. Campos omitidos em clientes antigos preservam os valores. Chave nova deve existir no catálogo de vozes. Resposta usa `null` para voz padrão.
+- A velocidade é relativa à configuração atual do provider. Alterações administrativas se aplicam às conversas existentes no próximo TTS. Voz com idioma diferente da conversa usa o padrão do idioma da conversa. Nenhum desses campos altera a identidade pública resolvida pelo avatar.
+
+
+## Vocabulário standalone
+
+- `GET /api/v1/vocabulary/today`: endpoint autenticado; retorna ou cria a lição do usuário para o dia UTC, com exatamente dez palavras em inglês, traduções/exemplos em português e progresso permanente por usuário/palavra normalizada. A unicidade `(user_id, lesson_date)` impede duas lições no mesmo dia; lições legadas incompletas são complementadas pelo Backend. A resposta acrescenta `progress: {quizCompleted,quizScore,writingCompleted,completedAt}`.
+- `POST /api/v1/vocabulary/quiz`: request `{lessonId,answers:[{wordId,selectedWordId}]}` com exatamente cinco respostas. As perguntas são as cinco primeiras palavras ordenadas da lição; todos os ids precisam pertencer à lição autenticada. O Backend calcula e persiste o score `0..5`, atualiza os cinco itens e devolve `{score,total,progress}`. Reenvio depois do sucesso devolve o resultado persistido sem incrementar contadores novamente.
+- `POST /api/v1/vocabulary/evaluate`: request `{lessonId,wordId,sentence}`; exige quiz concluído, valida ownership e avalia uma frase em inglês com status `CORRECT`, `NEEDS_IMPROVEMENT` ou `INCORRECT`, explicação em português e campos opcionais em inglês. Uma avaliação válida marca a prática escrita e, junto com o quiz, define `completedAt`; nova avaliação da mesma lição concluída é rejeitada antes da LLM.
+- O TTS reutiliza `POST /api/v1/speech` com `language: "en"`. A conclusão fica em `vocabulary_lessons` e sobrevive a refresh, logout e outro dispositivo.
+## Leitura standalone
+
+Endpoints autenticados, sem persistência ou histórico, com `Cache-Control: no-store`:
+
+- `POST /api/v1/reading/generate`: `{"difficulty":"INTERMEDIATE","topic":"TRAVEL"}` → `{"text":"English passage...","difficulty":"INTERMEDIATE","topic":"TRAVEL"}`.
+- Dificuldade reutiliza `ConversationDifficulty`: `BEGINNER` (A1–A2, alvo 80–130 palavras), `INTERMEDIATE` (B1–B2, 130–220), `ADVANCED` (C1–C2, 200–300). Tema: `DAILY_LIFE`, `TRAVEL`, `WORK`, `TECHNOLOGY`, `CULTURE`, `RANDOM`. Ambos são obrigatórios; valores inválidos retornam 400.
+- Máximo absoluto validado: 300 palavras separadas por espaços Unicode e 5000 caracteres. Resposta inválida, acima do limite ou declarada em idioma diferente de `en` retorna o erro de IA 503 existente. O prompt exige inglês; a indicação estruturada de idioma vem do provider, não de um detector linguístico independente.
+- `POST /api/v1/reading/hint`: `{"text":"English passage...","difficulty":"INTERMEDIATE"}` → `{"items":[{"expression":"English excerpt","explanation":"Explicação em português brasileiro.","type":"EXPRESSION"}]}`. Texto obrigatório, com os mesmos limites; a dificuldade é a do texto gerado.
+- `POST /api/v1/reading/questions`: request with `text` and controlled `difficulty`; returns exactly three questions, each with four English options, a zero-based `correctOption` (0-3), and a Portuguese support `explanation`. Invalid provider structure returns `{"questions":[]}` so the client can retry.
+- Dicas solicitam 3–5 itens relevantes ao nível, sem traduzir integralmente o texto. O parser aceita no máximo cinco itens válidos; cada expressão precisa ocorrer no texto (até 120 caracteres), explicação até 600 caracteres. Tipos: `VOCABULARY`, `PHRASAL_VERB`, `EXPRESSION`, `IDIOM`, `GRAMMAR`, `PRONUNCIATION`. Estrutura malformada retorna `{"items":[]}`; indisponibilidade do provider retorna 503. A UI mantém o texto e permite tentar novamente.
+- Áudio somente sob ação do usuário: `POST /api/v1/speech` com `{"text":"English passage...","language":"en"}`, sem `conversationId`, usando a voz inglesa padrão. Nenhum WAV é persistido.
 
 ## 1. Regras gerais
+
+`POST /api/v1/translate` mantém o campo `translation` e acrescenta `enrichment` para textos curtos (até 20 palavras, inclusive), com `usage` e até três exemplos; textos acima desse limite retornam `enrichment: null`. `POST /api/v1/correct` mantém `correctedText` e acrescenta `status` (`CORRECTED`, `CORRECT_WITH_SUGGESTIONS` ou `CORRECT`), explicação, dica, alternativas e exemplos quando relevantes.
 
 - Base URL de desenvolvimento: `http://localhost:8080`, configurável por ambiente.
 - Todos os endpoints de produto usam `/api/v1`.
@@ -52,7 +81,7 @@ Translate usa `sourceLanguage` e `targetLanguage`; correct, explain, chat e TTS 
 
 ## 6. Correction
 
-`POST /api/v1/correct` (protegido). Request `{"text":"I go yesterday","language":"en"}`. Response 200 `{"correctedText":"I went yesterday"}`. Máximo: 5000 caracteres.
+`POST /api/v1/correct` (protegido). Corrige exclusivamente texto em inglês; requests com `language` diferente de `en` retornam 400. Request `{"text":"I go yesterday","language":"en"}`. Response 200 inclui `correctedText`, `status`, explicação, dica, alternativas e exemplos quando relevantes. Máximo: 5000 caracteres.
 
 `POST /api/v1/correct/explain` (protegido). Request `{"originalText":"I go yesterday","correctedText":"I went yesterday","language":"en"}`. Response 200 `{"explanation":"..."}`. Cada texto: máximo 5000 caracteres.
 
@@ -173,7 +202,7 @@ O avatar do usuário é apenas identidade visual; nunca é enviado ao LLM, Whisp
 
 ## 18. Conversas persistentes
 
-`POST /api/v1/conversations` recebe `{"scenario":"JOB_INTERVIEW","language":"en"}` e retorna id, cenário, idioma, título determinístico, identidade visual e timestamps. Também existem `GET /api/v1/conversations` (lista leve), `GET /api/v1/conversations/{id}` (metadados e mensagens) e `DELETE /api/v1/conversations/{id}` (204).
+`POST /api/v1/conversations` recebe `{"scenario":"JOB_INTERVIEW","language":"en","difficulty":"INTERMEDIATE"}` e retorna id, cenário, idioma, dificuldade persistida, título determinístico, identidade visual e timestamps. Também existem `GET /api/v1/conversations` (lista leve), `GET /api/v1/conversations/{id}` (metadados e mensagens) e `DELETE /api/v1/conversations/{id}` (204). Conversas anteriores à V21 recebem `INTERMEDIATE`.
 
 `POST /api/v1/conversations/{id}/messages` recebe `{"message":"Hello."}` e retorna o mesmo formato do chat (`reply`, `hasCorrection`, `correctedText`). O backend grava USER e ASSISTANT; `correctedText`, quando presente, pertence à mensagem USER semanticamente, embora seja retornado junto do resultado.
 

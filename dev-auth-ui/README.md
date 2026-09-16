@@ -22,7 +22,8 @@ python -m http.server 5500
 - **Texto (padrão):** o microfone envia áudio a `POST /api/v1/transcriptions`; a transcrição preenche o campo para revisão. Envio e reprodução são manuais.
 - **Voz:** gravação explícita → STT completo → chat SSE → reply completa → `POST /api/v1/speech` → reprodução automática. O idioma selecionado (`en` ou `pt`) é mantido durante o turno. Não há escuta contínua nem nova gravação automática.
 - **Traduzir:** português ↔ inglês, inversão dos idiomas, limite de 5.000 caracteres e resultado em painel separado.
-- **Corrigir:** revisão em português ou inglês e explicação opcional via `POST /api/v1/correct/explain`.
+- **Corrigir:** correção de inglês, com explicação em português, dicas e exemplos no próprio `POST /api/v1/correct`.
+- **Vocabulário:** lição diária persistida com dez palavras apresentadas uma por vez, cinco questões progressivas, prática escrita avaliada e conclusão recuperada do Backend.
 - **Conta:** nome de usuário, e-mail, confirmação do e-mail e logout.
 
 A autenticação disponível nesta interface é login local e Google. Cadastro, confirmação por link e recuperação/redefinição de senha não estão implementados aqui. O perfil apenas exibe o estado de confirmação retornado pela API.

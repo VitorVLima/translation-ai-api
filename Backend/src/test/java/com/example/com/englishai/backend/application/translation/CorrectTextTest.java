@@ -14,11 +14,25 @@ class CorrectTextTest {
         assertThat(provider.request.userPrompt()).contains("<text-to-correct>").contains("I go to school yesterday");
     }
 
-    @Test void supportsPortugueseAndAlreadyCorrectText() {
-        var provider = new RecordingProvider(new LlmResponse("Eu fui à escola ontem."));
-        assertThat(new CorrectText(provider, 5000).execute(new CorrectTextCommand("Eu fui à escola ontem.", Language.PORTUGUESE)).correctedText())
-                .isEqualTo("Eu fui à escola ontem.");
-        assertThat(provider.request.systemPrompt()).contains("pt");
+    @Test void rejectsPortugueseBecauseStandaloneCorrectionTeachesEnglish() {
+        var provider = new RecordingProvider(new LlmResponse("unused"));
+        assertThatThrownBy(() -> new CorrectText(provider, 5000).execute(new CorrectTextCommand("Eu fui à escola ontem.", Language.PORTUGUESE)))
+                .isInstanceOf(InvalidCorrectionRequestException.class);
+        assertThat(provider.request).isNull();
+    }
+    @Test void parsesCorrectionStatesAndLearningContent() {
+        var provider = new RecordingProvider(new LlmResponse("{\"status\":\"CORRECTED\",\"corrected\":\"I am 26 years old.\",\"explanation\":\"Em inglês, usamos to be para idade.\",\"usageTip\":\"Use I am + idade + years old.\",\"examples\":[{\"text\":\"I am 20 years old.\",\"translation\":\"Eu tenho 20 anos.\"}]}"));
+        var result = new CorrectText(provider, 5000).execute(new CorrectTextCommand("I have 26 years old.", Language.ENGLISH));
+        assertThat(result.status()).isEqualTo(CorrectionStatus.CORRECTED);
+        assertThat(result.explanation()).contains("to be");
+        assertThat(result.examples()).hasSize(1);
+        assertThat(provider.request.responseFormat()).isEqualTo(LlmResponseFormat.JSON);
+    }
+    @Test void preservesCorrectStatusWithoutArtificialAlternative() {
+        var provider = new RecordingProvider(new LlmResponse("{\"status\":\"CORRECT\",\"corrected\":\"I do not know.\",\"explanation\":null,\"usageTip\":null,\"alternatives\":[],\"examples\":[]}"));
+        var result = new CorrectText(provider, 5000).execute(new CorrectTextCommand("I do not know.", Language.ENGLISH));
+        assertThat(result.status()).isEqualTo(CorrectionStatus.CORRECT);
+        assertThat(result.alternatives()).isEmpty();
     }
 
     @Test void rejectsInvalidInputAndEmptyProviderResponse() {

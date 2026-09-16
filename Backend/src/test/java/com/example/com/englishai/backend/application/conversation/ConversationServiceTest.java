@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ConversationServiceTest {
+    private final UserJpaRepository users = mock(UserJpaRepository.class);
     private final ConversationJpaRepository conversations = mock(ConversationJpaRepository.class);
     private final ConversationMessageJpaRepository messages = mock(ConversationMessageJpaRepository.class);
     private final UserProfileJpaRepository profileRepository = mock(UserProfileJpaRepository.class);
@@ -25,9 +26,10 @@ class ConversationServiceTest {
     private final UUID owner = UUID.randomUUID(), id = UUID.randomUUID();
     private final OffsetDateTime now = OffsetDateTime.now();
     private final ConversationService service = new ConversationService(conversations, messages,
-            new ChatWithTutor(provider, 5000), new ProfileService(profileRepository), definitions, identities, transactions);
+            new ChatWithTutor(provider, 5000), new ProfileService(profileRepository), definitions, identities, transactions, users);
 
     @BeforeEach void setup() {
+        when(users.findByIdForUpdate(any())).thenReturn(Optional.of(mock(UserEntity.class)));
         when(identities.resolve(anyString())).thenAnswer(invocation -> new com.example.com.englishai.backend.application.catalog.AssistantIdentityResolver.AssistantIdentity(
                 "Rodrigo", invocation.getArgument(0), "/api/v1/avatars/" + invocation.getArgument(0) + "/image"));
         when(definitions.findByScenarioKey("CUSTOM_INTERVIEW")).thenReturn(Optional.of(new ConversationScenarioDefinitionEntity(
@@ -58,17 +60,41 @@ class ConversationServiceTest {
         verify(profileRepository).findById(owner);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ConversationDifficulty.class)
+    void createsAndPersistsTheSelectedDifficulty(ConversationDifficulty difficulty) {
+        var created = service.create(owner, "CUSTOM_INTERVIEW", "en", difficulty.name());
+        assertThat(created.getDifficulty()).isEqualTo(difficulty);
+        assertThat(provider.request.systemPrompt()).contains("Selected difficulty: " + difficulty.name(),
+                "CEFR range: " + difficulty.cefrRange());
+        verify(conversations).save(argThat(c -> c.getDifficulty() == difficulty));
+    }
+
+    @Test void omittedDifficultyDefaultsToIntermediateForExistingClients() {
+        assertThat(service.create(owner, "CUSTOM_INTERVIEW", "en").getDifficulty())
+                .isEqualTo(ConversationDifficulty.INTERMEDIATE);
+    }
+
+    @Test void invalidDifficultyIsRejectedBeforeGenerationOrPersistence() {
+        assertThatThrownBy(() -> service.create(owner, "CUSTOM_INTERVIEW", "en", "EXPERT"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(provider.request).isNull();
+        verifyNoInteractions(definitions, profileRepository, conversations, messages);
+    }
+
     @Test void providerFailureLeavesNoConversationAndNoMessages() {
         provider.fail = true;
         assertThatThrownBy(() -> service.create(owner,"CUSTOM_INTERVIEW","en")).isInstanceOf(LlmProviderException.class);
-        verifyNoInteractions(conversations, messages);
+        verify(conversations, never()).save(any());
+        verifyNoInteractions(messages);
         assertThat(transactions.commits).isZero();
     }
 
     @Test void malformedOpeningIsNotPersisted() {
         provider.response = "{\"reply\":\"\",\"hasCorrection\":false,\"correctedText\":null}";
         assertThatThrownBy(() -> service.create(owner,"CUSTOM_INTERVIEW","en")).isInstanceOf(LlmProviderException.class);
-        verifyNoInteractions(conversations, messages);
+        verify(conversations, never()).save(any());
+        verifyNoInteractions(messages);
     }
 
     @Test void openingPersistenceFailureRollsBackTheWholeWrite() {

@@ -1,5 +1,17 @@
 ﻿# EnglishAI — Guia administrativo
 
+## Voz e velocidade dos cenários
+
+Em **Novo/Editar cenário**, escolha a voz e ajuste a velocidade entre **0,75x e 1,25x**. O indicador mostra o valor atual, como `1.00x`. As opções vêm do catálogo real do serviço TTS, por meio de `/api/v1/admin/tts/voices`; atualmente há Lessac High (EN) e Faber Medium (PT). Nenhum modelo é baixado pelo painel.
+
+**Padrão do idioma** mantém as vozes já configuradas no ambiente. Se a voz escolhida for de outro idioma, a conversa usa a voz padrão correspondente ao seu idioma. `1.00x` mantém o ritmo atual do ambiente; aumentar acelera e diminuir desacelera. A configuração pertence ao cenário e se aplica também às conversas existentes no próximo clique em Ouvir. Avatar e `behaviorInstructions` continuam independentes.
+
+Se o catálogo estiver indisponível, o formulário preserva a voz salva. Uma nova voz precisa ser validada pelo Backend contra o catálogo. Instale novos modelos com o respectivo `.onnx.json` nos diretórios das vozes configuradas, usando o prefixo de idioma `en_` ou `pt_`, para disponibilizá-los.
+
+Cada usuário, inclusive administradores, pode criar até três conversas persistentes. Excluir uma libera uma vaga. Conversas antigas excedentes não são apagadas automaticamente.
+
+Para ativar esta versão, reinicie o Piper e o Backend (Flyway aplica V20), e atualize as duas páginas web. Não há alteração de `.env` obrigatória.
+
 ## Primeiro administrador
 
 Defina `ADMIN_BOOTSTRAP_EMAIL` para o email de um usuário já existente e reinicie o Backend. A promoção é explícita por configuração; não há senha hardcoded nem elevação enviada pelo frontend. Remova a variável depois do bootstrap quando apropriado.
