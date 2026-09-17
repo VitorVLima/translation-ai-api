@@ -107,6 +107,16 @@ class JwtTokenValidatorTest {
         assertInvalid(token);
     }
 
+    @Test
+    void shouldExposeSafeRejectionReasonForDiagnostics() {
+        String otherSecret = Base64.getEncoder().encodeToString(randomKey());
+        String token = new JwtTokenGenerator(otherSecret, Duration.ofMinutes(15), clock).generate(userId);
+
+        assertThatThrownBy(() -> validator.validateAndGetUserId(token))
+                .isInstanceOfSatisfying(InvalidAuthenticationTokenException.class,
+                        exception -> assertThat(exception.reason()).isEqualTo(InvalidAuthenticationTokenException.Reason.SIGNATURE_INVALID));
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {-1, 0})
     void shouldRejectExpiredTokenIncludingExactExpirationInstant(long seconds) throws Exception {

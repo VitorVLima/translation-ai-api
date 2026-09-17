@@ -13,6 +13,7 @@ import com.example.com.englishai.backend.infrastructure.persistence.repository.U
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserProfileJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyLessonJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserVocabularyWordJpaRepository;
+import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyItemJpaRepository;
 import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import org.springframework.data.jpa.repository.Lock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -46,8 +49,11 @@ class VocabularyServiceTest {
     private final UserProfileJpaRepository profiles = mock(UserProfileJpaRepository.class);
     private final VocabularyLessonJpaRepository lessons = mock(VocabularyLessonJpaRepository.class);
     private final UserVocabularyWordJpaRepository vocabularyWords = mock(UserVocabularyWordJpaRepository.class);
+    private final VocabularyItemJpaRepository items = mock(VocabularyItemJpaRepository.class);
     private final UserJpaRepository users = mock(UserJpaRepository.class);
-    private final VocabularyService service = new VocabularyService(provider, profiles, lessons, vocabularyWords, users);
+    private final VocabularyReviewScheduler scheduler = new VocabularyReviewScheduler(
+            Clock.fixed(Instant.parse("2026-09-16T12:00:00Z"), ZoneOffset.UTC));
+    private final VocabularyService service = new VocabularyService(provider, profiles, lessons, vocabularyWords, items, users, scheduler);
     private final UUID user = UUID.randomUUID();
     private final Map<String, UserVocabularyWordEntity> permanentWords = new HashMap<>();
 
@@ -57,6 +63,8 @@ class VocabularyServiceTest {
         when(lessons.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(profiles.findById(user)).thenReturn(Optional.empty());
         when(users.findByIdForUpdate(any())).thenReturn(Optional.of(mock(UserEntity.class)));
+        when(vocabularyWords.findDueForReview(any(), any(), any(), any())).thenReturn(List.of());
+        when(items.findRecentSourcesByVocabularyWordIds(any(), any(), any())).thenReturn(List.of());
         doAnswer(invocation -> {
             UUID id = invocation.getArgument(0);
             UUID owner = invocation.getArgument(1);
@@ -126,8 +134,8 @@ class VocabularyServiceTest {
     @Test
     void legacyFiveWordLessonIsCompletedWithoutReplacingExistingProgress() {
         var existing = lesson(5);
-        existing.getItems().get(0).record(true);
-        existing.getItems().get(1).record(false);
+        record(existing.getItems().get(0), true);
+        record(existing.getItems().get(1), false);
         existing.completeQuiz(4, OffsetDateTime.now(ZoneOffset.UTC));
         existing.completeWriting(OffsetDateTime.now(ZoneOffset.UTC));
         var originalIds = existing.getItems().stream().map(VocabularyItemEntity::getId).toList();
@@ -209,7 +217,7 @@ class VocabularyServiceTest {
     void repeatedWordReusesThePermanentProgressRecordAndItsCounters() {
         var progress = new UserVocabularyWordEntity(UUID.randomUUID(), user, "hungry", "hungry",
                 OffsetDateTime.now(ZoneOffset.UTC));
-        progress.record(true, OffsetDateTime.now(ZoneOffset.UTC));
+        record(progress, true);
         var existing = new VocabularyLessonEntity(UUID.randomUUID(), user, LocalDate.now(), EnglishLevel.B1,
                 VocabularyCategory.FOOD, OffsetDateTime.now(ZoneOffset.UTC));
         for (int index = 1; index <= 9; index++) {
@@ -267,8 +275,8 @@ class VocabularyServiceTest {
     void permanentProgressRecordRetainsStatusAndCountersAcrossRecords() {
         var progress = new UserVocabularyWordEntity(UUID.randomUUID(), user, "hungry", "hungry",
                 OffsetDateTime.now(ZoneOffset.UTC));
-        progress.record(true, OffsetDateTime.now(ZoneOffset.UTC));
-        progress.record(false, OffsetDateTime.now(ZoneOffset.UTC));
+        record(progress, true);
+        record(progress, false);
 
         assertThat(progress.getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
         assertThat(progress.getCorrectCount()).isEqualTo(1);
@@ -392,7 +400,7 @@ class VocabularyServiceTest {
 
         assertThat(firstOccurrence.getStatus()).isEqualTo(VocabularyService.ProgressStatus.NEW);
         assertThat(secondOccurrence.getStatus()).isEqualTo(VocabularyService.ProgressStatus.NEW);
-        firstOccurrence.record(true);
+        record(firstOccurrence, true);
         assertThat(firstOccurrence.getCorrectCount()).isEqualTo(1);
         assertThat(secondOccurrence.getCorrectCount()).isEqualTo(1);
         assertThat(secondOccurrence.getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
@@ -448,6 +456,14 @@ class VocabularyServiceTest {
                     VocabularyCategory.FOOD, progress));
         }
         return lesson;
+    }
+
+    private void record(VocabularyItemEntity item, boolean correct) {
+        item.record(scheduler.record(item.getStatus(), item.getVocabularyWord().getReviewStage(), correct));
+    }
+
+    private void record(UserVocabularyWordEntity word, boolean correct) {
+        word.record(scheduler.record(word.getStatus(), word.getReviewStage(), correct));
     }
 
     private List<VocabularyService.QuizAnswer> quizAnswers(VocabularyLessonEntity lesson, int correctCount) {

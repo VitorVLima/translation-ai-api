@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.infrastructure.security;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidAuthenticationTokenException;
+import com.example.com.englishai.backend.application.authentication.exception.InvalidAuthenticationTokenException.Reason;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -51,45 +52,52 @@ public class JwtTokenValidator implements AuthenticationTokenValidator {
     @Override
     public UUID validateAndGetUserId(String token) {
         if (token == null || token.isBlank()) {
-            throw new InvalidAuthenticationTokenException();
+            throw new InvalidAuthenticationTokenException(Reason.MISSING);
         }
 
         try {
             SignedJWT jwt = SignedJWT.parse(token);
-            if (!JWSAlgorithm.HS256.equals(jwt.getHeader().getAlgorithm()) || !jwt.verify(verifier)) {
-                throw new InvalidAuthenticationTokenException();
+            if (!JWSAlgorithm.HS256.equals(jwt.getHeader().getAlgorithm())) {
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_ALGORITHM);
+            }
+            if (!jwt.verify(verifier)) {
+                throw new InvalidAuthenticationTokenException(Reason.SIGNATURE_INVALID);
             }
 
             JWTClaimsSet claims = jwt.getJWTClaimsSet();
             if (!"access".equals(claims.getStringClaim("token_type"))) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_TOKEN_TYPE);
             }
             if (!issuer.equals(claims.getIssuer())
                     || claims.getAudience() == null
                     || !claims.getAudience().contains(audience)) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(
+                        !issuer.equals(claims.getIssuer()) ? Reason.INVALID_ISSUER : Reason.INVALID_AUDIENCE
+                );
             }
             Date expiration = claims.getExpirationTime();
             if (expiration == null || !expiration.toInstant().isAfter(clock.instant())) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(Reason.EXPIRED);
             }
 
             Date issuedAt = claims.getIssueTime();
             if (issuedAt == null || issuedAt.toInstant().isAfter(clock.instant().plus(clockSkew))) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_IAT);
             }
 
             String subject = claims.getSubject();
             if (subject == null) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SUBJECT);
             }
             UUID userId = UUID.fromString(subject);
             if (!userId.toString().equalsIgnoreCase(subject)) {
-                throw new InvalidAuthenticationTokenException();
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SUBJECT);
             }
             return userId;
+        } catch (InvalidAuthenticationTokenException exception) {
+            throw exception;
         } catch (ParseException | JOSEException | IllegalArgumentException exception) {
-            throw new InvalidAuthenticationTokenException();
+            throw new InvalidAuthenticationTokenException(Reason.MALFORMED);
         }
     }
 

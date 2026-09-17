@@ -6,8 +6,12 @@ const ACCESS_KEY = "englishai_access_token", REFRESH_KEY = "englishai_refresh_to
 let chatHistory = [];
 let scenarioCatalog = [], avatarCatalog = [];
 let conversationLoadVersion = 0, pendingConversationCreation = null;
-const appState = { currentUser: null, profile: null, avatars: avatarCatalog, currentConversation: null, conversationCount: null, currentView: null, sidebarCollapsed: globalThis.localStorage?.getItem("englishai_sidebar_collapsed") === "true" };
+let conversationCompletion = null;
+let progressRequest = null, progressVersion = 0, progressPeriod = "ALL_TIME";
+const appState = { currentUser: null, profile: null, avatars: avatarCatalog, currentConversation: null, conversationCount: null, currentView: null, conversationNavigationContext: null, sidebarCollapsed: globalThis.localStorage?.getItem("englishai_sidebar_collapsed") === "true" };
 const $ = id => document.getElementById(id);
+const LOADING_DELAY_MS = 200;
+const loadingOperations = new Map();
 const loginView = $("login-view"), appView = $("app-view");
 const tokens = () => ({ accessToken: sessionStorage.getItem(ACCESS_KEY), refreshToken: sessionStorage.getItem(REFRESH_KEY) });
 const saveTokens = data => { if (data?.accessToken && data?.refreshToken) { sessionStorage.setItem(ACCESS_KEY, data.accessToken); sessionStorage.setItem(REFRESH_KEY, data.refreshToken); } };
@@ -17,10 +21,31 @@ const setMessage = (id, text = "", success = false) => {
   el.textContent = text;
   el.classList.toggle("success", success);
   el.classList.toggle("info", !success && ["Transcrevendo..."].includes(text));
+  if (id === "progress-status" && text) loadingOperations.get("progress-loading")?.finish();
 };
 function setButtonBusy(button, busy) {
   button.setAttribute("aria-busy", String(busy));
   button.classList.toggle("is-loading", busy);
+}
+function startLoading(id) {
+  const element = $(id);
+  if (!element) return () => {};
+  loadingOperations.get(id)?.finish();
+  const operation = { timer: null, finish: null };
+  operation.finish = () => {
+    if (loadingOperations.get(id) !== operation) return;
+    clearTimeout(operation.timer);
+    loadingOperations.delete(id);
+    element.hidden = true;
+    element.setAttribute("aria-busy", "false");
+  };
+  loadingOperations.set(id, operation);
+  element.hidden = true;
+  element.setAttribute("aria-busy", "true");
+  operation.timer = setTimeout(() => {
+    if (loadingOperations.get(id) === operation) element.hidden = false;
+  }, LOADING_DELAY_MS);
+  return operation.finish;
 }
 function applySidebarState() {
   const appLayout = document.querySelector?.(".app-layout");
@@ -70,7 +95,16 @@ async function authenticatedStream(path, options = {}) {
   saveTokens(refreshed.body);
   return fetch(`${BACKEND_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}), Authorization: `Bearer ${refreshed.body.accessToken}` } });
 }
-function showLogin(message = "", clear = true) { resetReading(); resetVocabulary(); clearCurrentConversation(); appState.currentUser = null; appState.profile = null; appState.conversationCount = null; scenarioCatalog = []; if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; $("skip-link").setAttribute("href", "#login-form"); setMessage("message", message); }
+function resetProgress() {
+  loadingOperations.get("progress-loading")?.finish();
+  progressVersion++; progressRequest?.abort(); progressRequest = null; progressPeriod = "ALL_TIME";
+  document.querySelectorAll?.(".progress-period").forEach(button => button.classList.toggle("active", button.dataset.period === progressPeriod));
+  ["progress-conversations", "progress-readings", "progress-new-words", "progress-mastered", "progress-conversation-count", "progress-conversation-success", "progress-conversation-rate", "progress-conversation-average", "progress-communication", "progress-grammar", "progress-vocabulary", "progress-fluency", "progress-reading-count", "progress-reading-success", "progress-reading-rate", "progress-reading-average", "progress-word-count", "progress-word-new", "progress-word-learning", "progress-word-reviewing", "progress-word-mastered", "progress-word-due", "progress-vocabulary-period"].forEach(id => { const element = $(id); if (element) element.textContent = ""; });
+  ["progress-conversation-difficulty", "progress-reading-difficulty", "progress-timeline"].forEach(id => $(id)?.replaceChildren());
+  const content = $("progress-content"); if (content) content.hidden = true;
+  setMessage("progress-status");
+}
+function showLogin(message = "", clear = true) { resetReading(); resetVocabulary(); resetProgress(); clearCurrentConversation(); appState.currentUser = null; appState.profile = null; appState.conversationCount = null; scenarioCatalog = []; if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; $("skip-link").setAttribute("href", "#login-form"); setMessage("message", message); }
 function validConversation(conversation) {
   return conversation && typeof conversation.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversation.id)
     && typeof conversation.scenario === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(conversation.scenario)
@@ -80,12 +114,19 @@ function validConversation(conversation) {
     && ["en", "pt"].includes(conversation.language);
 }
 function clearCurrentConversation() {
+  conversationCompletion?.controller.abort();
+  conversationCompletion = null;
+  $("conversation-evaluation").hidden = true;
+  $("conversation-evaluation").classList.remove("is-collapsed");
+  $("conversation-evaluation").replaceChildren();
+  setMessage("conversation-completion-status");
   conversationLoadVersion++;
   cancelConversation();
   appState.currentConversation = null;
   chatHistory = [];
   $("chat-messages").replaceChildren();
   $("chat-message").value = "";
+  $("chat-form").hidden = false;
   $("chat-count").textContent = "0";
   $("chat-language").disabled = false;
   $("view-chat").hidden = true;
@@ -96,19 +137,27 @@ function requireCurrentConversation() {
   showView("scenarios");
   return null;
 }
+function progressElement(id) {
+  const element = $(id);
+  if (!element) throw new Error(`[Progress] missing DOM element #${id}`);
+  return element;
+}
 function showView(name) {
   if (appState.currentView === "reading" && name !== "reading") returnToReadingSetup();
+  if (appState.currentView === "progress" && name !== "progress") resetProgress();
   if (name === "chat" && (!appState.currentUser || !validConversation(appState.currentConversation))) name = "scenarios";
   if (name !== "chat") clearCurrentConversation();
   appState.currentView = name;
   if (name === "reading") prepareReading();
-  if (name === "vocabulary") loadVocabulary().catch(() => setMessage("vocabulary-status", "Não foi possível carregar o vocabulário."));
+  if (name === "vocabulary") loadVocabulary().catch(() => { loadingOperations.get("vocabulary-loading")?.finish(); setMessage("vocabulary-status", "Não foi possível carregar o vocabulário."); });
+  if (name === "progress") loadProgress().catch(error => { console.error("[Progress] load failed", error); setMessage("progress-status", "Não foi possível carregar seu progresso."); });
   document.querySelectorAll(".page-view").forEach(v => v.hidden = v.id !== `view-${name}`);
+  const activeView = name === "chat" ? appState.conversationNavigationContext === "history" ? "conversations" : "scenarios" : name;
   document.querySelectorAll("[data-view]").forEach(b => {
-    b.classList.toggle("active", b.dataset.view === name);
-    b.setAttribute("aria-current", b.dataset.view === name ? "page" : "false");
+    b.classList.toggle("active", b.dataset.view === activeView);
+    b.setAttribute("aria-current", b.dataset.view === activeView ? "page" : "false");
   });
-  if (name === "scenarios" && appState.currentUser) return loadScenarios().catch(() => setMessage("scenario-status", "Não foi possível carregar os cenários."));
+  if (name === "scenarios" && appState.currentUser) return loadScenarios().catch(() => { loadingOperations.get("scenario-loading")?.finish(); setMessage("scenario-status", "Não foi possível carregar os cenários."); });
   if (name === "conversations" && appState.currentUser) return loadConversations().catch(() => setMessage("conversation-status", "Não foi possível carregar as conversas."));
 }
 
@@ -133,7 +182,7 @@ async function loginLocal(event) {
     saveTokens(result.body); await showHome();
   } catch (_) { setMessage("message", "Não foi possível conectar ao servidor."); } finally { button.disabled = false; setButtonBusy(button, false); }
 }
-async function showHome() { const state=await loadCurrentUser(); if(state.kind!=="user"){if(state.kind==="none")showLogin();else if(state.kind==="expired")showLogin("Sua sessão expirou. Entre novamente.");else showLogin("Não foi possível conectar ao servidor.",false);return;} const user=state.user; clearCurrentConversation(); if(appState.currentUser?.id!==user.id)resetVocabulary(); appState.currentUser=user; try{await loadGlobalProfile();}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");} loginView.hidden=true;appView.hidden=false;$("skip-link").setAttribute("href","#main-content");["username","header-username","account-username","account-name"].forEach(id=>$(id).textContent=user.username||"");["user-email","account-email"].forEach(id=>$(id).textContent=user.email||"");const verified=user.emailVerified===true?"Sim":user.emailVerified===false?"Não":"Não informado";$("verified").textContent=verified;$("account-verified").textContent=verified;showView("scenarios");}
+async function showHome() { const state=await loadCurrentUser(); if(state.kind!=="user"){if(state.kind==="none")showLogin();else if(state.kind==="expired")showLogin("Sua sessão expirou. Entre novamente.");else showLogin("Não foi possível conectar ao servidor.",false);return;} const user=state.user; clearCurrentConversation(); appState.conversationNavigationContext=null; if(appState.currentUser?.id!==user.id){resetVocabulary();resetProgress();} appState.currentUser=user; try{await loadGlobalProfile();}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");} loginView.hidden=true;appView.hidden=false;$("skip-link").setAttribute("href","#main-content");["username","header-username","account-name"].forEach(id=>{const el=$(id);if(el)el.textContent=user.username||"";});["account-email"].forEach(id=>{const el=$(id);if(el)el.textContent=user.email||"";});const verified=user.emailVerified===true?"Sim":user.emailVerified===false?"Não":"Não informado";const verifiedEl=$("account-verified");if(verifiedEl)verifiedEl.textContent=verified;showView("home");}
 
 async function runAi({ buttonId, statusId, path, body, onSuccess, loading }) {
   const button = $(buttonId), start = performance.now(); button.disabled = true; setButtonBusy(button, true); button.textContent = loading; setMessage(statusId);
@@ -149,11 +198,11 @@ async function correct() { const text = $("correction-text").value; $("corrected
 async function prepareGoogle() { if (!window.google?.accounts?.id || GOOGLE_CLIENT_ID.startsWith("COLOQUE")) return setMessage("message", "Configure GOOGLE_CLIENT_ID no app.js."); try { const nonceResult = await request("/api/v1/auth/google/nonce", { method: "POST" }); if (!nonceResult.response.ok || !nonceResult.body?.nonce) throw new Error(); const nonce = nonceResult.body.nonce; google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, nonce, callback: async credential => { try { const result = await request("/api/v1/auth/google", { method: "POST", body: JSON.stringify({ credential: credential.credential, nonce }) }); if (!result.response.ok) { setMessage("message", "Não foi possível entrar com Google."); return prepareGoogle(); } saveTokens(result.body); await showHome(); } catch (_) { setMessage("message", "Não foi possível conectar ao servidor."); } } }); $("google-button").replaceChildren(); google.accounts.id.renderButton($("google-button"), { theme: "outline", size: "large", width: 280 }); } catch (_) { setMessage("message", "Não foi possível conectar ao servidor."); } }
 async function logout() { clearCurrentConversation(); const refreshToken = tokens().refreshToken; try { if (refreshToken) await request("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }); } finally { showLogin(); } }
 
-document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
+document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => { if (button.dataset.view === "scenarios") appState.conversationNavigationContext = "new"; if (button.dataset.view === "conversations") appState.conversationNavigationContext = "history"; showView(button.dataset.view); }));
 $("sidebar-toggle")?.addEventListener("click", () => { appState.sidebarCollapsed = !appState.sidebarCollapsed; globalThis.localStorage?.setItem("englishai_sidebar_collapsed", String(appState.sidebarCollapsed)); applySidebarState(); });
 $("profile-header-link").addEventListener("click", () => { showView("profile"); loadProfileArea(); });
 applySidebarState();
-$("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("clear-chat").addEventListener("click", () => showView("scenarios")); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout").addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
+$("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout").addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
 $("translation-text").addEventListener("input", () => $("translation-count").textContent = $("translation-text").value.length); $("record-chat").addEventListener("click", toggleRecording); $("record-translation").addEventListener("click", () => toggleRecording(toolRecordingConfig("translation"))); $("record-correction").addEventListener("click", () => toggleRecording(toolRecordingConfig("correction"))); $("speak-translation").addEventListener("click", () => playSpeech($("speak-translation"), $("translation-speech-status"), $("translation-result").value, $("target-language").value, false, undefined, false)); $("speak-correction").addEventListener("click", () => playSpeech($("speak-correction"), $("correction-speech-status"), $("corrected-result").value, "en", false, undefined, false)); $("correction-text").addEventListener("input", () => $("correction-count").textContent = $("correction-text").value.length); $("swap-languages").addEventListener("click", () => { const a = $("source-language"), b = $("target-language"), value = a.value; a.value = b.value; b.value = value; });
 function appendChatMessage(role,text,pending=false){document.querySelectorAll(".chat-welcome").forEach(el => el.remove());const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong");label.textContent=role==="user"?"Você":appState.currentConversation?.assistantDisplayName||"";const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.hidden=false;bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);if(role==="assistant"&&text.trim())item.speechAction=appendAssistantActions(item,text,appState.currentConversation?.language);$("chat-messages").append(item);$("chat-messages").scrollTo({top:$('chat-messages').scrollHeight,behavior:chatScrollBehavior()});return {item,bubble};}
 
@@ -169,6 +218,60 @@ function setSpeechState(button, state) {
   button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-busy", String(state === "loading"));
 }
+
+const progressDifficultyLabels = { BEGINNER: "Iniciante", INTERMEDIATE: "Intermediário", ADVANCED: "Avançado" };
+const progressValue = value => value == null ? "—" : `${Math.round(value)}%`;
+function renderProgressBreakdown(container, rows, reading = false) {
+  container.replaceChildren();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const item = document.createElement("div"), name = document.createElement("strong"), count = document.createElement("span"), average = document.createElement("span");
+    item.className = "progress-breakdown-item"; name.textContent = progressDifficultyLabels[row.difficulty] || row.difficulty;
+    count.textContent = `${row.count} ${row.count === 1 ? "atividade" : "atividades"}`;
+    average.textContent = progressValue(reading ? row.averageComprehension : row.averageOverall);
+    item.append(name, count, average); container.append(item);
+  }
+}
+function renderProgress(data) {
+  data = data && typeof data === "object" ? data : {};
+  const overview = data.overview && typeof data.overview === "object" ? data.overview : {};
+  const c = data.conversation && typeof data.conversation === "object" ? data.conversation : {};
+  const r = data.reading && typeof data.reading === "object" ? data.reading : {};
+  const v = data.vocabulary && typeof data.vocabulary === "object" ? data.vocabulary : {};
+  const set=(id,value)=>progressElement(id).textContent=String(value ?? "");
+  set("progress-conversations", overview.conversationsCompleted); set("progress-readings", overview.readingsCompleted);
+  set("progress-new-words", overview.wordsFirstSeen); set("progress-mastered", overview.wordsMasteredCurrent);
+  set("progress-conversation-count", c.totalEvaluated); set("progress-conversation-success", c.successCount); set("progress-conversation-rate", progressValue(c.successRate)); set("progress-conversation-average", progressValue(c.averageOverall));
+  set("progress-communication", progressValue(c.averageCommunication)); set("progress-grammar", progressValue(c.averageGrammar)); set("progress-vocabulary", progressValue(c.averageVocabulary)); set("progress-fluency", progressValue(c.averageFluency));
+  set("progress-reading-count", r.totalCompleted); set("progress-reading-success", r.successCount); set("progress-reading-rate", progressValue(r.successRate)); set("progress-reading-average", progressValue(r.averageComprehension));
+  set("progress-word-count", v.totalWords); set("progress-word-new", v.newCount); set("progress-word-learning", v.learningCount); set("progress-word-reviewing", v.reviewingCount); set("progress-word-mastered", v.masteredCount); set("progress-word-due", v.dueForReview);
+  progressElement("progress-vocabulary-period").textContent = data.period === "ALL_TIME" ? "Estado atual do seu vocabulário." : `${v.wordsFirstSeenInPeriod} encontradas e ${v.wordsReviewedInPeriod} com revisão mais recente no período.`;
+  renderProgressBreakdown(progressElement("progress-conversation-difficulty"), c.byDifficulty); renderProgressBreakdown(progressElement("progress-reading-difficulty"), r.byDifficulty, true);
+  const timeline=progressElement("progress-timeline"); timeline.replaceChildren();
+  const timelinePayload=data.timeline;
+  const points=Array.isArray(timelinePayload) ? timelinePayload : Array.isArray(timelinePayload?.points) ? timelinePayload.points : Array.isArray(timelinePayload?.timeline) ? timelinePayload.timeline : [];
+  for(const point of points) { const conversation=point?.conversation||{}, reading=point?.reading||{}, vocabulary=point?.vocabulary||{}; const row=document.createElement("div"); row.className="progress-timeline-row"; const month=document.createElement("strong");month.textContent=point?.period||"—"; const conv=document.createElement("span");conv.textContent=`Conversação: ${progressValue(conversation.average)} (${conversation.count ?? 0})`; const read=document.createElement("span");read.textContent=`Leitura: ${progressValue(reading.average)} (${reading.count ?? 0})`; const words=document.createElement("span");words.textContent=`${vocabulary.wordsFirstSeen ?? 0} palavras novas`; row.append(month,conv,read,words); timeline.append(row); }
+  progressElement("progress-content").hidden=false;
+}
+async function loadProgress() {
+  const owner=appState.currentUser?.id; if(!owner) return;
+  const period=progressPeriod;
+  progressRequest?.abort(); const controller=new AbortController(), version=++progressVersion; progressRequest=controller;
+  const current=()=>progressRequest===controller && version===progressVersion && appState.currentUser?.id===owner && appState.currentView==="progress";
+  progressElement("progress-status"); const content=progressElement("progress-content"); const finishLoading=startLoading("progress-loading"); setMessage("progress-status"); content.hidden=true;
+  let main, timeline;
+  try { [main,timeline]=await Promise.all([authenticatedRequest(`/api/v1/progress?period=${period}`,{signal:controller.signal}),authenticatedRequest("/api/v1/progress/timeline",{signal:controller.signal})]); }
+  catch(error){ if(current()&&error?.name!=="AbortError"){console.error("[Progress] request failed", error);setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente.");} return; }
+  if(!current()){ finishLoading(); return; }
+  if(main.response.status===401||timeline.response.status===401) return showLogin("Sua sessão expirou. Entre novamente.");
+  if(!main.response.ok||!timeline.response.ok) { finishLoading(); return setMessage("progress-status",errorMessage(main.response.status)); }
+  try {
+    renderProgress({...main.body,timeline:timeline.body});
+    finishLoading();
+    setMessage("progress-status");
+  } catch(error) { if(current()){ console.error("[Progress] render failed", error); setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente."); } }
+  finally { finishLoading(); if(progressRequest===controller)progressRequest=null; }
+}
+document.querySelectorAll?.(".progress-period").forEach(button=>button.addEventListener("click",()=>{progressPeriod=button.dataset.period || "ALL_TIME";document.querySelectorAll(".progress-period").forEach(other=>other.classList.toggle("active",other===button));loadProgress();}));
 function stopSpeech() {
   const speech = currentSpeech;
   if (!speech) return;
@@ -317,6 +420,9 @@ function setVoiceState(state) {
   updateConversationControls();
 }
 function updateConversationControls() {
+  const closed = !!appState.currentConversation?.endedAt, evaluating = conversationCompletion !== null;
+  $("delete-conversation").hidden = closed || !appState.currentConversation;
+  $("chat-form").hidden = closed;
   const recordingBusy = recordingOperation !== null;
   const voiceBusy = isVoiceMode() && (recordingBusy || activeChat !== null || currentSpeech !== null);
   $("send-chat").disabled = activeChat !== null || (isVoiceMode() && (recordingBusy || currentSpeech !== null));
@@ -336,7 +442,84 @@ function updateConversationControls() {
       (currentSpeech?.button === action && action.getAttribute("aria-busy") === "true");
   });
   updateToolRecordingControls();
+  if (closed || evaluating) {
+    $("send-chat").disabled = true;
+    $("chat-message").disabled = true;
+    $("record-chat").disabled = true;
+  }
+  $("complete-conversation").disabled = !appState.currentConversation || closed || evaluating || activeChat !== null || recordingBusy || voiceState === "generating_speech";
+  $("complete-conversation").textContent = evaluating ? "Avaliando sua conversa..." : closed ? "Conversa concluída" : "Encerrar conversa";
+  $("complete-conversation").setAttribute("aria-busy", String(evaluating));
+  document.querySelectorAll("[data-chat-mode]").forEach(button => button.disabled = evaluating || closed);
 }
+function renderConversationEvaluation(evaluation) {
+  const area = $("conversation-evaluation");
+  area.replaceChildren();
+  area.hidden = !evaluation;
+  if (!evaluation) return;
+  area.classList.remove("is-collapsed");
+  const title = document.createElement("h2"); title.textContent = "Resultado da conversa";
+  const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "secondary small-action conversation-evaluation-toggle";
+  toggle.textContent = "Recolher"; toggle.setAttribute("aria-expanded", "true"); toggle.setAttribute("aria-controls", "conversation-evaluation");
+  const summary = document.createElement("p");
+  summary.textContent = evaluation.status === "SUCCESS" ? "Boa comunicação! Continue praticando seu inglês." : "Continue praticando. Esta conversa mostrou pontos que você pode desenvolver.";
+  const overall = document.createElement("h3"); overall.textContent = `Desempenho geral: ${evaluation.scores.overall}/100`;
+  const scores = document.createElement("dl"); scores.className = "conversation-evaluation-scores";
+  for (const [key, label] of [["communication", "Comunicação"], ["grammar", "Gramática"], ["vocabulary", "Vocabulário"], ["fluency", "Fluência linguística"], ["relevance", "Relevância"]]) {
+    const term = document.createElement("dt"), value = document.createElement("dd");
+    term.textContent = label; value.textContent = evaluation.scores[key] == null ? "—" : String(evaluation.scores[key]); scores.append(term, value);
+  }
+  title.hidden = false; title.append(toggle); area.append(title, summary, overall, scores);
+  for (const [key, label] of [["strengths", "Pontos fortes"], ["improvements", "Para melhorar"]]) {
+    const heading = document.createElement("h3"), list = document.createElement("ul"); heading.textContent = label;
+    for (const text of evaluation[key]) { const item = document.createElement("li"); item.textContent = text; list.append(item); }
+    area.append(heading, list);
+  }
+  const back = document.createElement("button"); back.type = "button"; back.className = "secondary"; back.textContent = "Voltar às conversas";
+  back.onclick = () => showView("conversations"); area.append(back);
+  const details = Array.from(area.children).slice(1);
+  details.forEach(element => element.hidden = false);
+  toggle.onclick = () => {
+    area.classList.toggle("is-collapsed");
+    const collapsed = area.classList.contains("is-collapsed");
+    details.forEach(element => element.hidden = collapsed);
+    toggle.textContent = collapsed ? "Expandir" : "Recolher";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+  };
+}
+function validConversationEvaluation(value, id) {
+  return value?.conversationId === id && ["SUCCESS", "NEEDS_PRACTICE"].includes(value.status)
+    && typeof value.evaluatedAt === "string" && ["communication", "grammar", "vocabulary", "fluency", "overall"].every(key => Number.isInteger(value.scores?.[key]) && value.scores[key] >= 0 && value.scores[key] <= 100)
+    && (value.scores.relevance == null || Number.isInteger(value.scores.relevance) && value.scores.relevance >= 0 && value.scores.relevance <= 100)
+    && ["strengths", "improvements"].every(key => Array.isArray(value[key]) && value[key].length <= 3 && value[key].every(text => typeof text === "string" && text.length <= 500));
+}
+async function completeConversation() {
+  const conversation = appState.currentConversation;
+  if (!conversation || conversation.endedAt || conversationCompletion || activeChat || recordingOperation || voiceState === "generating_speech") return;
+  const operation = { controller: new AbortController(), conversation, userId: appState.currentUser?.id };
+  const isCurrent = () => conversationCompletion === operation && appState.currentConversation === conversation && appState.currentUser?.id === operation.userId;
+  conversationCompletion = operation;
+  stopSpeech(); updateConversationControls();
+  setMessage("conversation-completion-status", "Avaliando sua conversa...");
+  try {
+    const r = await authenticatedRequest(`/api/v1/conversations/${encodeURIComponent(conversation.id)}/complete`, { method: "POST", signal: operation.controller.signal });
+    if (!isCurrent()) return;
+    if (r.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    if (!r.response.ok) return setMessage("conversation-completion-status", errorMessage(r.response.status) + " Você pode tentar novamente.");
+    if (r.body?.status === "INSUFFICIENT" && r.body.conversationId === conversation.id) {
+      return setMessage("conversation-completion-status", `Converse um pouco mais antes de encerrar para avaliarmos seu desempenho. Participação: ${r.body.currentUserMessages} de ${r.body.minimumUserMessages} mensagens necessárias.`);
+    }
+    if (!validConversationEvaluation(r.body, conversation.id)) throw new Error("Invalid evaluation");
+    conversation.endedAt = r.body.evaluatedAt;
+    renderConversationEvaluation(r.body);
+    setMessage("conversation-completion-status", "Avaliação salva. Você pode consultar o resultado no histórico.", true);
+  } catch (error) {
+    if (isCurrent() && error.name !== "AbortError") setMessage("conversation-completion-status", "Não foi possível avaliar a conversa. Tente novamente; seu histórico foi preservado.");
+  } finally {
+    if (isCurrent()) { conversationCompletion = null; updateConversationControls(); }
+  }
+}
+$("complete-conversation").addEventListener("click", completeConversation);
 function updateToolRecordingControls() { for (const tool of ["translation", "correction"]) { const config=toolRecordingConfig(tool), button=$(config.buttonId), active=recordingOperation?.buttonId===config.buttonId; button.disabled=!!recordingOperation&&!active; button.textContent=active&&recordingState==="recording"?"Parar gravação":active&&recordingState==="processing"?"Transcrevendo...":active&&recordingState==="acquiring"?"Abrindo microfone...":"Microfone"; button.title=active&&recordingState==="recording"?"Parar gravação":`Gravar texto para ${tool==="translation"?"traduzir":"corrigir"}`; button.setAttribute("aria-label",button.title); button.classList.toggle("recording",active&&recordingState==="recording"); button.setAttribute("aria-busy",String(active&&(recordingState==="acquiring"||recordingState==="processing"))); } }
 // Development-only diagnostics; numeric values stay with the DOM, never in chat history.
 function showTurnMetric(item, label, seconds) {
@@ -466,6 +649,7 @@ async function transcribeRecording(operation, blob) {
   }
 }
 async function toggleRecording(config = chatRecordingConfig()) {
+  if (config.kind === "chat" && (appState.currentConversation?.endedAt || conversationCompletion)) return;
   if ($("record-chat").disabled && config.kind === "chat" || $(config.buttonId).disabled) return;
   if (recordingState === "recording") {
     recordingOperation.processingStarted = performance.now();
@@ -581,6 +765,7 @@ async function sendChatStream(event) {
 async function sendChatMessage(message, language, options) {
   const conversation = requireCurrentConversation();
   if (!conversation) return;
+  if (conversation.endedAt || conversationCompletion) return;
   language = conversation.language;
   if (activeChat || options.generation !== conversationGeneration) return;
   if (typeof message !== "string" || !message.trim()) return;
@@ -723,12 +908,13 @@ function setUserAvatar(key){const avatar=avatarCatalog.find(x=>x.key===key);cons
 function setAssistantAvatar(meta){const url=meta?.assistantAvatarImageUrl||meta?.imageUrl;setAvatarTarget("chat-assistant-avatar-slot",url,`Avatar de ${meta?.assistantDisplayName||"assistant"}`,"assistant");const box=$("chat-assistant");if(box)box.hidden=!meta;const name=$("chat-assistant-name"),description=$("chat-assistant-description");if(name)name.textContent=meta?.assistantDisplayName||"";if(description)description.textContent=meta?.description||"";}
 function renderProfileSummary(d){$("profile-summary-name").textContent=d?.preferredName||"Não informado";$("profile-summary-age").textContent=d?.age??"Não informado";$("profile-summary-level").textContent=englishLevelLabels[d?.englishLevel]||"Não informado";$("profile-summary-goal").textContent=goalLabels[d?.learningGoal]||"Não informado";$("profile-onboarding").textContent=d?.onboardingCompleted?"Concluído.":"Complete seu perfil para personalizar as conversas.";setUserAvatar(d?.avatarKey||"avatar_default");$("profile-edit-button").textContent=d?.onboardingCompleted?"Editar perfil":"Completar perfil";}
 async function loadGlobalProfile(){const [p,a]=await Promise.all([authenticatedRequest("/api/v1/users/me/profile"),authenticatedRequest("/api/v1/avatars")]);if(!p.response.ok)throw Error("profile request failed");appState.profile=p.body||{};currentProfile=appState.profile;avatarCatalog=a.response.ok&&Array.isArray(a.body)?a.body:[];appState.avatars=avatarCatalog;renderProfileSummary(currentProfile);renderAvatars();return appState.profile;}
-async function loadProfileArea(){setMessage("profile-status","Carregando perfil...");$("profile-summary").hidden=false;$("profile-edit-panel").hidden=true;try{if(!appState.profile)await loadGlobalProfile();else{currentProfile=appState.profile;avatarCatalog=appState.avatars;renderProfileSummary(currentProfile);renderAvatars();}setMessage("profile-status");}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");}}
+async function loadProfileArea(){const needsFetch=!appState.profile;const finishLoading=needsFetch?startLoading("profile-loading"):()=>{};setMessage("profile-status");$("profile-summary").hidden=needsFetch;$("profile-edit-panel").hidden=true;try{if(needsFetch)await loadGlobalProfile();else{currentProfile=appState.profile;avatarCatalog=appState.avatars;renderProfileSummary(currentProfile);renderAvatars();}$("profile-summary").hidden=false;setMessage("profile-status");}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");}finally{finishLoading();}}
 function openProfileEdit(){const d=currentProfile||{};profileDraftAvatarKey=d.avatarKey||"avatar_default";$("profile-name").value=d.preferredName||"";$("profile-age").value=d.age??"";$("profile-level").value=d.englishLevel||"";$("profile-goal").value=d.learningGoal||"";$("profile-summary").hidden=true;$("profile-edit-panel").hidden=false;renderAvatars();$("profile-name").focus();}
 function closeProfileEdit(){profileDraftAvatarKey=null;$("profile-edit-panel").hidden=true;$("profile-summary").hidden=false;renderAvatars();}
 async function saveProfile(e){e.preventDefault();const saveButton=$("profile-save-button"),body={preferredName:$("profile-name").value||null,age:$("profile-age").value?Number($("profile-age").value):null,englishLevel:$("profile-level").value||null,learningGoal:$("profile-goal").value||null};saveButton.disabled=true;setButtonBusy(saveButton,true);setMessage("profile-status","Salvando perfil...");try{const profileResult=await authenticatedRequest("/api/v1/users/me/profile",{method:"PUT",body:JSON.stringify(body)});if(!profileResult.response.ok){setMessage("profile-status",profileResult.response.status===401?"Sua sessão expirou.":errorMessage(profileResult.response.status));return;}currentProfile=profileResult.body||{...currentProfile,...body};appState.profile=currentProfile;const avatarKey=profileDraftAvatarKey||currentProfile.avatarKey;if(avatarKey&&avatarKey!==currentProfile.avatarKey){const avatarResult=await authenticatedRequest("/api/v1/users/me/profile/avatar/predefined",{method:"PUT",body:JSON.stringify({avatarKey})});if(!avatarResult.response.ok){renderProfileSummary(currentProfile);setMessage("profile-status","Dados salvos, mas não foi possível atualizar o avatar. Tente salvar novamente.");return;}currentProfile=avatarResult.body||{...currentProfile,avatarKey};appState.profile=currentProfile;}renderProfileSummary(currentProfile);closeProfileEdit();setMessage("profile-status","Perfil salvo.",true);}catch(_){setMessage("profile-status","Não foi possível conectar ao servidor.");}finally{saveButton.disabled=false;setButtonBusy(saveButton,false);}}
 const CONVERSATION_LIMIT = 3;
-const conversationLimitMessage = "Você atingiu o limite de 3 conversas. Exclua uma conversa para iniciar outra.";
+const conversationLimitMessage = "Você já possui 3 conversas ativas. Encerre ou exclua uma delas para iniciar outra.";
+const activeConversationCount = conversations => Array.isArray(conversations) ? conversations.filter(conversation => !conversation.endedAt).length : null;
 const conversationDifficulties = [
   { value: "BEGINNER", label: "Iniciante", cefr: "A1–A2", hint: "Conversas mais simples, com frases curtas, vocabulário comum e mais ajuda durante a prática.", features: ["Frases mais simples", "Vocabulário comum", "Mais ajuda"] },
   { value: "INTERMEDIATE", label: "Intermediário", cefr: "B1–B2", hint: "Conversas mais naturais, com vocabulário mais variado e um pouco mais de desafio.", features: ["Conversas naturais", "Vocabulário mais amplo", "Ajuda moderada"] },
@@ -790,16 +976,18 @@ function updateScenarioCapacity() {
 }
 async function loadScenarios(){
   const version = conversationLoadVersion;
-  setMessage("scenario-status","Carregando cenários...");
+  const finishLoading = startLoading("scenario-loading");
+  const list = $("scenario-list"); list.hidden = true;
+  setMessage("scenario-status");
   appState.conversationCount = null;
   updateScenarioCapacity();
   const [r, owned] = await Promise.all([authenticatedRequest("/api/v1/conversation-scenarios"), authenticatedRequest("/api/v1/conversations")]);
-  if(version !== conversationLoadVersion || !appState.currentUser)return;
-  if(!r.response.ok)return setMessage("scenario-status",errorMessage(r.response.status));
-  appState.conversationCount = owned.response.ok && Array.isArray(owned.body) ? owned.body.length : null;
+  if(version !== conversationLoadVersion || !appState.currentUser){ finishLoading(); return; }
+  if(!r.response.ok){ finishLoading(); return setMessage("scenario-status",errorMessage(r.response.status)); }
+  appState.conversationCount = owned.response.ok ? activeConversationCount(owned.body) : null;
   scenarioCatalog=Array.isArray(r.body)?r.body:[];
-  const list=$("scenario-list"); list.replaceChildren();
-  if(!scenarioCatalog.length){const empty=document.createElement("p");empty.textContent="Nenhum cenário disponível no momento.";list.append(empty);return;}
+  list.replaceChildren();
+  if(!scenarioCatalog.length){const empty=document.createElement("p");empty.textContent="Nenhum cenário disponível no momento.";list.append(empty);list.hidden=false;finishLoading();return;}
   for(const sc of scenarioCatalog){
     const card=document.createElement("article"); card.className="catalog-card scenario-card card";
     const avatarUrl=sc.assistantAvatarImageUrl||sc.imageUrl;
@@ -811,8 +999,9 @@ async function loadScenarios(){
     const b=document.createElement("button");b.className="primary";b.textContent="Iniciar conversa";b.addEventListener("click",()=>createConversation(sc.id,b,difficultyPicker.selected(),modePicker.selected()));
     card.append(h,assistant,description,difficultyPicker.fieldset,modePicker.fieldset,b);list.append(card);
   }
-  updateScenarioCapacity();
+  list.hidden=false; updateScenarioCapacity();
   setMessage("scenario-status", appState.conversationCount == null ? "Não foi possível verificar suas conversas. Abra Cenários novamente para tentar." : appState.conversationCount >= CONVERSATION_LIMIT ? conversationLimitMessage : "");
+  finishLoading();
 }
 async function createConversation(scenario, button, difficulty = "INTERMEDIATE", mode = "text") {
   if (pendingConversationCreation) return;
@@ -846,7 +1035,7 @@ async function createConversation(scenario, button, difficulty = "INTERMEDIATE",
     if (!validConversation(r.body) || r.body.scenario !== scenario) {
       return setMessage("scenario-status", "O servidor retornou uma conversa inválida. Consulte Conversas antes de tentar novamente.");
     }
-    await openConversation(r.body.id, scenario, { playOpening: mode === "voice" });
+    await openConversation(r.body.id, scenario, { playOpening: mode === "voice", navigationContext: "new" });
   } catch (_) {
     if (isCurrent()) setMessage("scenario-status", "Não foi possível concluir a abertura. Consulte Conversas antes de tentar novamente.");
   } finally {
@@ -859,23 +1048,26 @@ async function createConversation(scenario, button, difficulty = "INTERMEDIATE",
 function formatConversationDate(value) { if (!value) return ""; const date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date); }
 async function loadConversations(){
   const version=conversationLoadVersion;
-  setMessage("conversation-status","Carregando conversas...");
+  const finishLoading = startLoading("conversation-loading");
+  const list=$("conversation-list"); list.hidden=true;
+  setMessage("conversation-status");
   try {
     const r=await authenticatedRequest("/api/v1/conversations");
     if(version!==conversationLoadVersion || !appState.currentUser)return;
     if(!r.response.ok){setMessage("conversation-status",errorMessage(r.response.status));return;}
-    appState.conversationCount = Array.isArray(r.body) ? r.body.length : null;
-    const list=$("conversation-list");list.replaceChildren();
-    if(!Array.isArray(r.body)||!r.body.length){const empty=document.createElement("p");empty.textContent="Nenhuma conversa ainda. Escolha um cenário para começar.";list.append(empty);setMessage("conversation-status");return;}
-    for(const c of r.body){const card=document.createElement("article");card.className="catalog-card conversation-card card";const avatarUrl=c.assistantAvatarImageUrl;card.append(createAvatarElement({imageUrl:avatarUrl,alt:`Avatar de ${c.assistantDisplayName||""}`,className:"conversation-avatar"}));const h=document.createElement("h3");h.textContent=c.scenarioDisplayName||c.title||"Conversa";const assistant=document.createElement("p");assistant.className="scenario-assistant-name";assistant.textContent=c.assistantDisplayName||"";const meta=document.createElement("small");const date=formatConversationDate(c.updatedAt), difficulty=conversationDifficultyLabels[c.difficulty]||conversationDifficultyLabels.INTERMEDIATE;meta.textContent=`${difficulty}${date?` · Atualizada em ${date}`:""}`;const actions=document.createElement("div");const open=document.createElement("button");open.className="secondary";open.textContent="Abrir";open.onclick=()=>openConversation(c.id);const del=document.createElement("button");del.className="button-danger";del.textContent="Excluir";del.onclick=()=>deleteConversation(c.id);actions.append(open,del);card.append(h,assistant,meta,actions);list.append(card);}
-    setMessage("conversation-status");
+    appState.conversationCount = activeConversationCount(r.body);
+    list.replaceChildren();
+    if(!Array.isArray(r.body)||!r.body.length){const empty=document.createElement("p");empty.textContent="Nenhuma conversa ainda. Escolha um cenário para começar.";list.append(empty);list.hidden=false;setMessage("conversation-status");return;}
+    for(const c of r.body){const card=document.createElement("article");card.className=`catalog-card conversation-card card ${c.endedAt?"conversation-ended":"conversation-active"}`;const avatarUrl=c.assistantAvatarImageUrl;card.append(createAvatarElement({imageUrl:avatarUrl,alt:`Avatar de ${c.assistantDisplayName||""}`,className:"conversation-avatar"}));const h=document.createElement("h3");h.textContent=c.scenarioDisplayName||c.title||"Conversa";const assistant=document.createElement("p");assistant.className="scenario-assistant-name";assistant.textContent=c.assistantDisplayName||"";const state=document.createElement("small");state.className="conversation-state";state.textContent=c.endedAt?"✓ Encerrada":"● Ativa";const meta=document.createElement("small");const date=formatConversationDate(c.updatedAt), difficulty=conversationDifficultyLabels[c.difficulty]||conversationDifficultyLabels.INTERMEDIATE;meta.textContent=`${difficulty}${date?` · Atualizada em ${date}`:""}`;const actions=document.createElement("div");const open=document.createElement("button");open.className="secondary";open.textContent="Abrir";open.onclick=()=>{open.disabled=true;setButtonBusy(open,true);open.textContent="Carregando...";return openConversation(c.id, undefined, { navigationContext: "history" }).finally(()=>{open.disabled=false;setButtonBusy(open,false);open.textContent="Abrir";});};actions.append(open);if(!c.endedAt){const del=document.createElement("button");del.className="button-danger";del.textContent="Excluir";del.onclick=()=>deleteConversation(c.id);actions.append(del);}card.append(h,assistant,state,meta,actions);list.append(card);}
+    list.hidden=false; setMessage("conversation-status");
   } catch (_) {
     if(version===conversationLoadVersion && appState.currentUser)setMessage("conversation-status","Não foi possível carregar as conversas.");
   } finally {
-    if(version===conversationLoadVersion && appState.currentUser && appState.currentView === "conversations" && $("conversation-status").textContent === "Carregando conversas...") setMessage("conversation-status","Não foi possível carregar as conversas.");
+    finishLoading();
   }
 }
 async function openConversation(id, expectedScenario, options = {}) {
+  appState.conversationNavigationContext = options.navigationContext || appState.conversationNavigationContext || (appState.currentView === "conversations" ? "history" : "new");
   clearCurrentConversation();
   const version = conversationLoadVersion, userId = appState.currentUser?.id;
   if (!userId) return showLogin();
@@ -909,6 +1101,9 @@ async function openConversation(id, expectedScenario, options = {}) {
       }
     }
     showView("chat");
+    if (validConversationEvaluation(detail.evaluation, conversation.id)) renderConversationEvaluation(detail.evaluation);
+    else if (conversation.endedAt) setMessage("conversation-completion-status", "Conversa concluída.");
+    updateConversationControls();
     if (openingItem?.item.speechAction && isVoiceMode() && options.playOpening) {
       openingItem.bubble.hidden = true;
       if (openingItem.item.chatActions) openingItem.item.chatActions.hidden = true;
@@ -932,15 +1127,17 @@ async function openConversation(id, expectedScenario, options = {}) {
   }
 }
 
-async function deleteConversation(id){if(!window.confirm("Excluir esta conversa?"))return;const r=await authenticatedRequest(`/api/v1/conversations/${id}`,{method:"DELETE"});if(!r.response.ok)return setMessage("conversation-status",errorMessage(r.response.status));if(appState.currentConversation?.id===id)showView("conversations");await loadConversations();if(appState.currentView==="scenarios")await loadScenarios();}
+async function deleteConversation(id, options = {}) { if (!window.confirm("Excluir esta conversa? Todas as mensagens desta conversa serão removidas permanentemente.")) return; const r = await authenticatedRequest(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }); const statusId = options.statusId || "conversation-status"; if (!r.response.ok) return setMessage(statusId, errorMessage(r.response.status)); if (appState.currentConversation?.id === id) { if (options.navigateToNew) { appState.conversationNavigationContext = "new"; clearCurrentConversation(); await showView("scenarios"); } else showView("conversations"); } await loadConversations(); if (appState.currentView === "scenarios") await loadScenarios(); }
 try { $("profile-form").addEventListener("submit",saveProfile); } catch (_) {}
 try { $("profile-edit-button").addEventListener("click",openProfileEdit); $("profile-cancel-button").addEventListener("click",closeProfileEdit); } catch (_) {}
 document.querySelectorAll('[data-view="profile"]').forEach(b=>b.addEventListener("click",loadProfileArea));
+$("delete-conversation").addEventListener("click", () => deleteConversation(appState.currentConversation?.id, { navigateToNew: true, statusId: "conversation-completion-status" }));
 
 // Reading is session-only. The generated difficulty belongs to the displayed text,
 // even if the user changes the next exercise's controls before asking for hints.
 const readingTopicLabels = { DAILY_LIFE: "Cotidiano", TRAVEL: "Viagem", WORK: "Trabalho", TECHNOLOGY: "Tecnologia", CULTURE: "Cultura", RANDOM: "Aleatório" };
-const readingState = { picker: null, current: null, generation: null, hint: null, hintConsumed: false, questions: null, questionGeneration: null, answers: new Map(), score: 0 };
+const validUuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const readingState = { picker: null, current: null, generation: null, hint: null, hintConsumed: false, questions: null, questionGeneration: null, submission: null, answers: new Map(), score: 0 };
 function prepareReading() {
   if (!readingState.picker) {
     readingState.picker = createDifficultyPicker("reading");
@@ -962,7 +1159,7 @@ function updateReadingControls() {
 }
 function cancelReadingRequests() {
   readingState.generation?.abort(); readingState.hint?.abort(); readingState.questionGeneration?.abort();
-  readingState.generation = null; readingState.hint = null; readingState.questionGeneration = null;
+  readingState.generation = null; readingState.hint = null; readingState.questionGeneration = null; readingState.submission = null;
   if (currentSpeech?.button === $("reading-speak")) stopSpeech();
   setMessage("reading-status"); setMessage("reading-hint-status"); setMessage("reading-questions-status");
   updateReadingControls();
@@ -1074,21 +1271,43 @@ function renderReadingQuestions(questions) {
       const status = document.createElement("strong"); status.textContent = correct ? "✓ Correto" : "✗ Incorreto"; result.append(status);
       if (!correct) { const answerText = document.createElement("p"); answerText.textContent = `Resposta correta: ${question.options[question.correctOption]}`; result.append(answerText); }
       const explanation = document.createElement("p"); explanation.textContent = question.explanation; result.append(explanation);
-      if (readingState.answers.size === questions.length) $("reading-score").textContent = `Resultado: ${readingState.score} de ${questions.length}`;
+      if (readingState.answers.size === questions.length) {
+        $("reading-score").textContent = `Resultado: ${readingState.score} de ${questions.length}`;
+        submitReadingActivity();
+      }
     });
     card.append(options, confirm, result); box.append(card);
   });
   $("reading-questions").hidden = false;
 }
+async function submitReadingActivity() {
+  const reading = readingState.current;
+  if (!reading?.activityId || readingState.submission || readingState.answers.size !== 3) return;
+  const controller = new AbortController(); readingState.submission = controller;
+  try {
+    const answers = [...readingState.answers.entries()].map(([index, selectedOption]) => ({ questionId: readingState.questions[index].id, selectedOption }));
+    const result = await authenticatedRequest(`/api/v1/reading/${reading.activityId}/submit`, { method: "POST", signal: controller.signal, body: JSON.stringify({ answers }) });
+    if (readingState.submission !== controller || readingState.current !== reading) return;
+    if (result.sessionInvalid || result.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    if (!result.response.ok) return setMessage("reading-questions-status", errorMessage(result.response.status));
+    const data = result.body;
+    if (Number.isInteger(data?.correctAnswers) && Number.isInteger(data?.totalQuestions)) {
+      $("reading-score").textContent = `Resultado: ${data.correctAnswers} de ${data.totalQuestions} (${data.percentage}% de compreensão)`;
+    }
+  } catch (_) {
+    if (readingState.submission === controller) setMessage("reading-questions-status", "Não foi possível salvar o resultado. Tente novamente.");
+  } finally { if (readingState.submission === controller) readingState.submission = null; }
+}
 async function requestReadingQuestions() {
   if (!readingState.current || readingState.questions || readingState.questionGeneration || readingState.generation || appState.currentView !== "reading") return;
   const controller = new AbortController(), reading = readingState.current; readingState.questionGeneration = controller; updateReadingControls(); setMessage("reading-questions-status", "Preparando questões...");
   try {
-    const result = await authenticatedRequest("/api/v1/reading/questions", { method: "POST", signal: controller.signal, body: JSON.stringify({ text: reading.text, difficulty: reading.difficulty }) });
+    const body = reading.activityId ? { activityId: reading.activityId } : { text: reading.text, difficulty: reading.difficulty };
+    const result = await authenticatedRequest("/api/v1/reading/questions", { method: "POST", signal: controller.signal, body: JSON.stringify(body) });
     if (readingState.questionGeneration !== controller || readingState.current !== reading) return;
     if (result.sessionInvalid || result.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
     if (!result.response.ok || !Array.isArray(result.body?.questions) || result.body.questions.length !== 3
-      || result.body.questions.some(question => !question || !["MAIN_IDEA", "DETAIL", "VOCABULARY"].includes(question.type) || typeof question.question !== "string" || !question.question.trim() || !Array.isArray(question.options) || question.options.length !== 4 || question.options.some(option => typeof option !== "string" || !option.trim()) || !Number.isInteger(question.correctOption) || question.correctOption < 0 || question.correctOption > 3 || typeof question.explanation !== "string" || !question.explanation.trim())) {
+      || result.body.questions.some(question => !question || (reading.activityId && !validUuid(question.id)) || !["MAIN_IDEA", "DETAIL", "VOCABULARY"].includes(question.type) || typeof question.question !== "string" || !question.question.trim() || !Array.isArray(question.options) || question.options.length !== 4 || question.options.some(option => typeof option !== "string" || !option.trim()) || !Number.isInteger(question.correctOption) || question.correctOption < 0 || question.correctOption > 3 || typeof question.explanation !== "string" || !question.explanation.trim())) {
       $("reading-questions").hidden = false;
       return setMessage("reading-questions-status", "Não foi possível preparar as questões. Tente novamente.");
     }
@@ -1124,6 +1343,7 @@ const vocabularyState = {
 };
 
 function resetVocabulary() {
+  loadingOperations.get("vocabulary-loading")?.finish();
   vocabularyState.version++;
   vocabularyState.loadController?.abort();
   vocabularyState.quizController?.abort();
@@ -1146,6 +1366,7 @@ function resetVocabulary() {
   vocabularyState.evaluating = false;
   if ($("vocabulary-quiz-items")) $("vocabulary-quiz-items").replaceChildren();
   if ($("vocabulary-study")) $("vocabulary-study").hidden = false;
+  if ($("vocabulary-card")) $("vocabulary-card").hidden = false;
   if ($("vocabulary-study-complete")) $("vocabulary-study-complete").hidden = true;
   if ($("vocabulary-exercises")) $("vocabulary-exercises").hidden = true;
   if ($("vocabulary-quiz")) $("vocabulary-quiz").hidden = true;
@@ -1211,6 +1432,7 @@ function renderCurrentVocabularyWord() {
   $("vocabulary-example-translation").textContent = word.exampleTranslation;
   $("vocabulary-word-status").textContent = vocabularyProgressLabels[word.status] || "";
   $("vocabulary-word-status").className = `vocabulary-word-status status-${String(word.status || "new").toLowerCase()}`;
+  $("vocabulary-review-badge").hidden = !word.review;
   $("vocabulary-word-audio").dataset.speechLabel = `Ouvir a palavra ${word.word}`;
   $("vocabulary-example-audio").dataset.speechLabel = `Ouvir o exemplo de ${word.word}`;
   setSpeechState($("vocabulary-word-audio"), "idle");
@@ -1380,6 +1602,7 @@ async function submitVocabularyQuiz(action) {
     && vocabularyState.version === version && vocabularyState.ownerId === ownerId && appState.currentUser?.id === ownerId;
   vocabularyState.quizSubmitting = true;
   action.disabled = true;
+  setButtonBusy(action, true);
   action.textContent = "Salvando resultado...";
   setMessage("vocabulary-quiz-status");
   try {
@@ -1411,6 +1634,7 @@ async function submitVocabularyQuiz(action) {
     if (vocabularyState.quizController === controller) {
       vocabularyState.quizController = null;
       vocabularyState.quizSubmitting = false;
+      setButtonBusy(action, false);
     }
   }
 }
@@ -1427,6 +1651,7 @@ async function evaluateVocabularySentence() {
     && vocabularyState.version === version && vocabularyState.ownerId === ownerId && appState.currentUser?.id === ownerId;
   vocabularyState.evaluating = true;
   $("vocabulary-evaluate").disabled = true;
+  setButtonBusy($("vocabulary-evaluate"), true);
   setMessage("vocabulary-evaluate-status", "Avaliando frase...");
   try {
     const result = await authenticatedRequest("/api/v1/vocabulary/evaluate", { method: "POST", signal: controller.signal, body: JSON.stringify({ lessonId: lesson.id, wordId, sentence }) });
@@ -1466,6 +1691,7 @@ async function evaluateVocabularySentence() {
     if (vocabularyState.evaluationController === controller) {
       vocabularyState.evaluationController = null;
       vocabularyState.evaluating = false;
+      setButtonBusy($("vocabulary-evaluate"), false);
       $("vocabulary-evaluate").disabled = Boolean(vocabularyState.lesson?.progress?.writingCompleted);
     }
   }
@@ -1482,7 +1708,9 @@ async function loadVocabulary() {
   vocabularyState.ownerId = ownerId;
   const isCurrent = () => vocabularyState.loadController === controller && vocabularyState.version === version
     && vocabularyState.ownerId === ownerId && appState.currentUser?.id === ownerId;
-  setMessage("vocabulary-status", "Carregando vocabulário...");
+  const finishLoading = startLoading("vocabulary-loading");
+  $("vocabulary-card").hidden = true;
+  setMessage("vocabulary-status");
   try {
     const result = await authenticatedRequest("/api/v1/vocabulary/today", { signal: controller.signal });
     if (!isCurrent()) return;
@@ -1490,10 +1718,12 @@ async function loadVocabulary() {
     if (!result.response.ok) return setMessage("vocabulary-status", errorMessage(result.response.status));
     if (!result.body || !Array.isArray(result.body.words) || result.body.words.length !== VOCABULARY_ITEMS_PER_LESSON) return setMessage("vocabulary-status", "Não foi possível carregar uma lição válida.");
     renderVocabulary(result.body, ownerId);
+    $("vocabulary-card").hidden = false;
     setMessage("vocabulary-status");
   } catch (error) {
     if (isCurrent() && error?.name !== "AbortError") setMessage("vocabulary-status", "Não foi possível carregar o vocabulário. Tente novamente.");
   } finally {
+    finishLoading();
     if (vocabularyState.loadController === controller) vocabularyState.loadController = null;
   }
 }

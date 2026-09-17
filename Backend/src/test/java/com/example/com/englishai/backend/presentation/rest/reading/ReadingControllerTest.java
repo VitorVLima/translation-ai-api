@@ -31,8 +31,10 @@ class ReadingControllerTest {
         verifyNoInteractions(service);
     }
     @Test void returnsReadingAndHintsWithoutInternalFields() throws Exception {
-        when(service.generate(ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL))
-                .thenReturn(new ReadingService.Reading("We visited a village.", ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL));
+        UUID userId = UUID.randomUUID();
+        when(tokens.validateAndGetUserId("test")).thenReturn(userId);
+        when(service.generateForUser(userId, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL))
+                .thenReturn(new ReadingService.Reading(UUID.randomUUID(), "We visited a village.", ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL));
         mvc.perform(post("/api/v1/reading/generate").header("Authorization", "Bearer test").contentType("application/json")
                 .content("{\"difficulty\":\"INTERMEDIATE\",\"topic\":\"TRAVEL\"}"))
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))

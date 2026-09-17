@@ -2,9 +2,9 @@ package com.example.com.englishai.backend.infrastructure.persistence.entity;
 
 import com.example.com.englishai.backend.application.vocabulary.VocabularyCategory;
 import com.example.com.englishai.backend.application.vocabulary.VocabularyService;
+import com.example.com.englishai.backend.application.vocabulary.VocabularyReviewScheduler;
 import jakarta.persistence.*;
 
-import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
@@ -20,12 +20,19 @@ public class VocabularyItemEntity {
     @Column(nullable = false, length = 500) private String example;
     @Column(name = "example_translation", nullable = false, length = 600) private String exampleTranslation;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 32) private VocabularyCategory category;
+    @Column(name = "review_item", nullable = false) private boolean reviewItem;
 
     protected VocabularyItemEntity() {}
 
     public VocabularyItemEntity(UUID id, VocabularyLessonEntity lesson, int position, String word, String translation,
                                 String example, String exampleTranslation, VocabularyCategory category,
                                 UserVocabularyWordEntity vocabularyWord) {
+        this(id, lesson, position, word, translation, example, exampleTranslation, category, vocabularyWord, false);
+    }
+
+    public VocabularyItemEntity(UUID id, VocabularyLessonEntity lesson, int position, String word, String translation,
+                                String example, String exampleTranslation, VocabularyCategory category,
+                                UserVocabularyWordEntity vocabularyWord, boolean reviewItem) {
         this.id = id;
         this.lesson = lesson;
         this.position = position;
@@ -35,10 +42,10 @@ public class VocabularyItemEntity {
         this.exampleTranslation = exampleTranslation;
         this.category = category;
         this.vocabularyWord = vocabularyWord;
+        this.reviewItem = reviewItem;
     }
 
-    public void record(boolean correct, OffsetDateTime now) { vocabularyWord.record(correct, now); }
-    public void record(boolean correct) { record(correct, OffsetDateTime.now()); }
+    public void record(VocabularyReviewScheduler.ReviewDecision decision) { vocabularyWord.record(decision); }
     public UUID getId() { return id; }
     public int getPosition() { return position; }
     public String getWord() { return word; }
@@ -50,4 +57,5 @@ public class VocabularyItemEntity {
     public VocabularyService.ProgressStatus getStatus() { return vocabularyWord.getStatus(); }
     public int getCorrectCount() { return vocabularyWord.getCorrectCount(); }
     public int getIncorrectCount() { return vocabularyWord.getIncorrectCount(); }
+    public boolean isReviewItem() { return reviewItem; }
 }

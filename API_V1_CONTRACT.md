@@ -1,6 +1,27 @@
 # EnglishAI API v1 — Contrato para clientes mobile
 
+## Meu Progresso (Etapa 3)
+
+`GET /api/v1/progress?period=ALL_TIME` (período omitido = `ALL_TIME`) e `GET /api/v1/progress/timeline` são endpoints autenticados e somente leitura. As fontes de verdade são `conversation_evaluations`, atividades `reading_activities` concluídas e `user_vocabulary_words`; não existe tabela geral nem `overallEnglishScore`.
+
+Os períodos são `ALL_TIME`, `LAST_7_DAYS` (janela móvel), `CURRENT_MONTH` (primeiro dia do mês até agora) e `LAST_30_DAYS` (janela móvel). O cálculo usa `Clock` no Backend e UTC, não o relógio do navegador. Períodos finitos retornam comparação com o intervalo anterior; `CURRENT_MONTH` compara o início do mês atual até o dia equivalente do mês anterior, limitado ao tamanho daquele mês. Deltas de percentuais são pontos percentuais e ficam nulos quando não há amostra anterior.
+
+A conversação agrega avaliações persistidas por resultado, médias das quatro dimensões e dificuldade. A leitura agrega apenas `SUCCESS`/`NEEDS_PRACTICE` concluídas, por resultado e dificuldade. O vocabulário retorna o estado atual por status, palavras vencidas e, em períodos finitos, apenas `firstSeenAt` e a revisão mais recente por `lastReviewedAt`; não inventa contagem histórica de sessões nem de transições para `MASTERED`. A timeline retorna sempre seis meses cronológicos, com médias nulas nos meses sem atividade.
+
 Status: revisão de contrato; extensões aditivas de TTS e cenários descritas abaixo.
+
+## Conclusão e avaliação de conversas (Etapa 2)
+
+**CONVERSA INICIADA ≠ CONVERSA CONCLUÍDA.** Navegar, ouvir áudio ou fechar a página não conclui a atividade.
+
+- `POST /api/v1/conversations/{id}/complete`: autenticado, sem corpo. Identidade vem do principal; conversa alheia/inexistente retorna 404. Exige pelo menos quatro mensagens `USER` contendo letras; mensagens vazias, apenas números/pontuação e mensagens da IA não contam. A verificação é determinística, anterior à LLM.
+- Participação insuficiente retorna 200: `{"conversationId":"uuid","status":"INSUFFICIENT","minimumUserMessages":4,"currentUserMessages":2}`. Não chama LLM, não persiste avaliação e mantém a conversa ativa.
+- Avaliação válida retorna `conversationId`, `status`, `scores` (`communication`, `grammar`, `vocabulary`, `fluency`, `overall`), `strengths`, `improvements` e `evaluatedAt`. Scores são inteiros 0..100; cada lista de feedback tem até três textos de até 500 caracteres, em português brasileiro. Exemplos linguísticos permanecem em inglês.
+- Backend calcula `overall = (communication + grammar + vocabulary + fluency + 2) / 4`, com divisão inteira (arredondamento de metade para cima). **SUCCESS_THRESHOLD = 60**: resultado >=60 é `SUCCESS`; abaixo é `NEEDS_PRACTICE`. Ambos encerram a conversa. **INSUFFICIENT ≠ NEEDS_PRACTICE**.
+- `GET /api/v1/conversations/{id}` preserva `conversation` e `messages`, adicionando `evaluation` (null antes da avaliação). O DTO de conversa, inclusive na listagem, adiciona `endedAt` nullable. Reabrir histórico não chama a LLM.
+- Repetir `/complete` devolve o resultado persistido, sem nova chamada LLM. Há uma única avaliação por conversa. Uma conversa encerrada não aceita mensagens, inclusive streaming (400). Encerramento durante geração pendente também retorna 400; a UI bloqueia a ação enquanto o turno está incompleto. Erro do provider/JSON inválido retorna 503 e mantém a conversa ativa para retry.
+- `FLUENCY` significa continuidade linguística, naturalidade e capacidade de manter a interação. Não mede pronúncia, sotaque, velocidade ou pausas acústicas. Avaliação relativa à dificuldade e ao cenário; não altera EnglishLevel nem infere CEFR.
+- Texto e voz usam o mesmo histórico textual persistido. Áudio não é persistido. Conversas antigas não são avaliadas automaticamente; podem ser concluídas por solicitação explícita quando elegíveis.
 
 ## Atualização: limite de conversas e voz por cenário
 
@@ -244,3 +265,6 @@ Persistent conversation creation requires an explicit `scenario`: omitted, null,
 GET detail enforces ownership and returns the stored conversation/history without generating a new opening or creating another conversation. Disabled scenarios remain usable for existing history; creation requires an enabled scenario. The dev-auth-ui opens chat only after loading this detail. Existing public DTOs, endpoints and legacy chat compatibility are preserved.
 
 `GET /api/v1/conversation-scenarios` resolves `assistantDisplayName`, `assistantAvatarKey` and `assistantAvatarImageUrl` from the referenced predefined avatar. `GET /api/v1/conversations` and `GET /api/v1/conversations/{id}` return the same resolved identity plus `scenarioDisplayName` and `description`. Clients display these fields directly; they do not join the avatar catalog or hardcode names. `conversation_scenarios.assistantDisplayName` remains an administrative compatibility field and is not the public identity source.
+- `POST /api/v1/reading/generate`: autenticado; gera o texto e cria uma atividade `IN_PROGRESS`, retornando `activityId`, texto, dificuldade e tema.
+- `POST /api/v1/reading/questions`: com `activityId`, associa e persiste as três questões da atividade (o formato textual legado continua aceito para compatibilidade).
+- `POST /api/v1/reading/{activityId}/submit`: autenticado; recebe exatamente três respostas, valida-as contra as questões persistidas e calcula `correctAnswers`, percentual inteiro (`0,33,67,100`) e `SUCCESS` (2–3 acertos) ou `NEEDS_PRACTICE` (0–1). A operação é idempotente.

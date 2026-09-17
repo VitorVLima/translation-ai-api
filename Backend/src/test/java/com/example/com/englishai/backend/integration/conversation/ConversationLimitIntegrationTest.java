@@ -50,6 +50,12 @@ class ConversationLimitIntegrationTest {
         for (int i = 0; i < count; i++) conversations.saveAndFlush(new ConversationEntity(UUID.randomUUID(), id, "FREE_TALK", "en", "Test", now));
         return id;
     }
+    UUID ownerWithEnded(int active, int ended) {
+        UUID id = owner(0); var now = OffsetDateTime.now();
+        for (int i = 0; i < active; i++) conversations.saveAndFlush(new ConversationEntity(UUID.randomUUID(), id, "FREE_TALK", "en", "Active", now.plusSeconds(i)));
+        for (int i = 0; i < ended; i++) { var c = new ConversationEntity(UUID.randomUUID(), id, "FREE_TALK", "en", "Ended", now.plusSeconds(i)); c.end(now.plusSeconds(100 + i)); conversations.saveAndFlush(c); }
+        return id;
+    }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(ints = {0, 2})
     void availableSlotCreatesConversationAndOpening(int initial) {
@@ -71,6 +77,27 @@ class ConversationLimitIntegrationTest {
         service.delete(id, service.list(id).getFirst().getId());
         service.create(id, "FREE_TALK", "en");
         assertThat(conversations.countByUserId(id)).isEqualTo(3);
+    }
+    @Test void endedConversationsDoNotConsumeCapacity() {
+        UUID twoActive = ownerWithEnded(2, 10);
+        service.create(twoActive, "FREE_TALK", "en");
+        UUID threeActive = ownerWithEnded(3, 10);
+        assertThatThrownBy(() -> service.create(threeActive, "FREE_TALK", "en")).isInstanceOf(ConversationLimitReachedException.class);
+        assertThat(conversations.countByUserIdAndEndedAtIsNull(twoActive)).isEqualTo(3);
+        assertThat(conversations.countByUserIdAndEndedAtIsNull(threeActive)).isEqualTo(3);
+    }
+    @Test void endingConversationReleasesSlotAndEndedDeleteIsRejected() {
+        UUID id = ownerWithEnded(3, 1);
+        var history = conversations.findByUserIdOrderedForHistory(id);
+        assertThat(history.getFirst().getEndedAt()).isNull();
+        assertThat(history.getLast().getEndedAt()).isNotNull();
+        var ended = history.stream().filter(c -> c.getEndedAt() != null).findFirst().orElseThrow();
+        assertThatThrownBy(() -> service.delete(id, ended.getId())).isInstanceOf(IllegalStateException.class);
+        assertThat(conversations.findById(ended.getId())).isPresent();
+        var active = conversations.findByUserIdOrderedForHistory(id).stream().filter(c -> c.getEndedAt() == null).findFirst().orElseThrow();
+        active.end(OffsetDateTime.now()); conversations.saveAndFlush(active);
+        service.create(id, "FREE_TALK", "en");
+        assertThat(conversations.countByUserIdAndEndedAtIsNull(id)).isEqualTo(3);
     }
     @Test void concurrentGenerationsCannotBothClaimLastSlot() throws Exception {
         UUID id = owner(2);

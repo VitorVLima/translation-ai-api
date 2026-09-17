@@ -86,11 +86,11 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<ConversationEntity> list(UUID userId) {
-        return conversations.findByUserIdOrderByUpdatedAtDesc(userId);
+        return conversations.findByUserIdOrderedForHistory(userId);
     }
 
     private void checkCapacity(UUID userId) {
-        if (conversations.countByUserId(userId) >= MAX_CONVERSATIONS) throw new ConversationLimitReachedException();
+        if (conversations.countByUserIdAndEndedAtIsNull(userId) >= MAX_CONVERSATIONS) throw new ConversationLimitReachedException();
     }
 
     @Transactional(readOnly = true)
@@ -107,13 +107,18 @@ public class ConversationService {
 
     @Transactional
     public void delete(UUID userId, UUID id) {
-        conversations.delete(require(userId, id));
+        writes.executeWithoutResult(status -> {
+            var conversation = requireForUpdate(userId, id);
+            if (conversation.getEndedAt() != null) throw new IllegalStateException("Ended conversations are permanent history");
+            conversations.delete(conversation);
+        });
     }
 
     public ConversationMessageEntity addMessage(UUID userId, UUID id, String role, String content, String corrected) {
         ChatRole.valueOf(role);
         return writes.execute(status -> {
-            var conversation = require(userId, id);
+            var conversation = requireForUpdate(userId, id);
+            conversation.requireActive();
             var now = OffsetDateTime.now(ZoneOffset.UTC);
             var message = messages.save(new ConversationMessageEntity(UUID.randomUUID(), id, role, content, corrected, now));
             conversation.touch(now);
@@ -135,16 +140,34 @@ public class ConversationService {
 
     private ChatWithTutorResult respond(UUID userId, UUID id, String content, Consumer<String> onChunk) {
         var conversation = require(userId, id);
+        conversation.requireActive();
         var recent = new ArrayList<>(messages.findTop10ByConversationIdOrderByCreatedAtDesc(id));
         Collections.reverse(recent);
         var prior = recent.stream().map(message -> new ChatHistoryMessage(ChatRole.valueOf(message.getRole()), message.getContent())).toList();
         var command = new ChatWithTutorCommand(content, Language.fromCode(conversation.getLanguage()), prior);
         chat.validateRequest(command);
         var context = context(userId, definition(conversation.getScenarioKey()), conversation.getDifficulty());
-        addMessage(userId, id, "USER", content, null);
-        var result = onChunk == null ? chat.execute(command, context) : chat.stream(command, onChunk, context);
-        addMessage(userId, id, "ASSISTANT", result.reply(), result.hasCorrection() ? result.correctedText() : null);
-        return result;
+        writes.executeWithoutResult(status -> {
+            var active = requireForUpdate(userId, id);
+            active.beginResponse();
+            conversations.save(active);
+        });
+        try {
+            addMessage(userId, id, "USER", content, null);
+            var result = onChunk == null ? chat.execute(command, context) : chat.stream(command, onChunk, context);
+            addMessage(userId, id, "ASSISTANT", result.reply(), result.hasCorrection() ? result.correctedText() : null);
+            return result;
+        } finally {
+            writes.executeWithoutResult(status -> conversations.findForUpdateByIdAndUserId(id, userId).ifPresent(active -> {
+                active.finishResponse();
+                conversations.save(active);
+            }));
+        }
+    }
+
+    private ConversationEntity requireForUpdate(UUID userId, UUID id) {
+        return conversations.findForUpdateByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NoSuchElementException("Conversation not found"));
     }
 
     private ConversationScenarioDefinitionEntity definition(String key) {
