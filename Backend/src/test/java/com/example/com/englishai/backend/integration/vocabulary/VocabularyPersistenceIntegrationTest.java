@@ -5,6 +5,7 @@ import com.example.com.englishai.backend.application.llm.LlmResponse;
 import com.example.com.englishai.backend.application.llm.LlmProviderException;
 import com.example.com.englishai.backend.application.ports.LlmProvider;
 import com.example.com.englishai.backend.application.vocabulary.VocabularyService;
+import com.example.com.englishai.backend.application.vocabulary.VocabularyReviewScheduler;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserVocabularyWordEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.VocabularyItemEntity;
@@ -15,6 +16,7 @@ import com.example.com.englishai.backend.infrastructure.persistence.repository.U
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserProfileJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserVocabularyWordJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyLessonJpaRepository;
+import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyItemJpaRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.OffsetDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -52,6 +55,7 @@ class VocabularyPersistenceIntegrationTest {
     @Autowired UserProfileJpaRepository profiles;
     @Autowired VocabularyLessonJpaRepository lessons;
     @Autowired UserVocabularyWordJpaRepository vocabularyWords;
+    @Autowired VocabularyItemJpaRepository vocabularyItems;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired VocabularyService configuredService;
@@ -66,13 +70,16 @@ class VocabularyPersistenceIntegrationTest {
         cleanupOwners(jdbc.queryForList("select id from users where email like 'vocabulary-%@test.com'", UUID.class));
         reset(provider);
         transactions = new TransactionTemplate(transactionManager);
-        service = new VocabularyService(provider, profiles, lessons, vocabularyWords, users);
+        service = new VocabularyService(provider, profiles, lessons, vocabularyWords, vocabularyItems, users,
+                new VocabularyReviewScheduler(java.time.Clock.systemUTC()));
         when(provider.complete(any())).thenAnswer(invocation -> {
             LlmRequest request = invocation.getArgument(0);
             if (request.systemPrompt().startsWith("Evaluate an English learner sentence")) {
                 return new LlmResponse("{\"status\":\"CORRECT\",\"explanation\":\"Uso correto.\"}");
             }
-            if (request.systemPrompt().contains("exactly 5")) return new LlmResponse(generatedWordsRange(6, 5));
+            if (request.userPrompt().startsWith("Complete the existing")) return new LlmResponse(generatedWordsRange(6, 5));
+            var matcher = java.util.regex.Pattern.compile("Create exactly (\\d+)").matcher(request.systemPrompt());
+            if (matcher.find()) return new LlmResponse(generatedWords(Integer.parseInt(matcher.group(1))));
             return new LlmResponse(generatedWords(10));
         });
     }
@@ -176,7 +183,8 @@ class VocabularyPersistenceIntegrationTest {
             for (int index = 1; index <= 5; index++) {
                 var progress = vocabularyWords.save(new UserVocabularyWordEntity(UUID.randomUUID(), user,
                         "word-" + index, "word-" + index, now));
-                if (index == 1) progress.record(true, now);
+                if (index == 1) progress.record(new VocabularyReviewScheduler(Clock.fixed(now.toInstant(), now.getOffset()))
+                        .record(progress.getStatus(), progress.getReviewStage(), true));
                 lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, index, "word-" + index,
                         "tradução-" + index, "Example " + index + ".", "Exemplo " + index + ".",
                         VocabularyCategory.FOOD, progress));
@@ -207,6 +215,37 @@ class VocabularyPersistenceIntegrationTest {
         assertThat(count("select count(*) from user_vocabulary_words where user_id=?", user)).isZero();
         assertThat(count("select count(*) from vocabulary_items i join vocabulary_lessons l on l.id=i.lesson_id "
                 + "where l.user_id=?", user)).isZero();
+    }
+
+    @Test
+    void dueWordIsReusedAsAReviewAndOnlyTheMissingNewWordsAreGenerated() {
+        UUID user = owner("review");
+        VocabularyCategory category = VocabularyCategory.values()[Math.floorMod(
+                java.util.Objects.hash(user, java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                VocabularyCategory.values().length)];
+        tx(() -> {
+            OffsetDateTime now = OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(3);
+            var progress = vocabularyWords.save(new UserVocabularyWordEntity(UUID.randomUUID(), user,
+                    "reviewed", "reviewed", now));
+            var historical = new VocabularyLessonEntity(UUID.randomUUID(), user,
+                    java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusDays(2), EnglishLevel.B1, category, now);
+            historical.addItem(new VocabularyItemEntity(UUID.randomUUID(), historical, 1, "reviewed",
+                    "revisado", "A reviewed example.", "Um exemplo.", category, progress));
+            lessons.saveAndFlush(historical);
+            jdbc.update("update user_vocabulary_words set status='REVIEWING', review_stage=2, "
+                    + "last_reviewed_at=?, next_review_at=? where id=?", now, OffsetDateTime.now(java.time.ZoneOffset.UTC).minusHours(1), progress.getId());
+            return null;
+        });
+
+        var lesson = tx(() -> service.today(user));
+
+        assertThat(lesson.words()).hasSize(10);
+        assertThat(lesson.words().getFirst().review()).isTrue();
+        assertThat(lesson.words().getFirst().word()).isEqualTo("reviewed");
+        assertThat(lesson.words()).filteredOn(word -> !word.review()).hasSize(9);
+        assertThat(count("select count(*) from user_vocabulary_words where user_id=?", user)).isEqualTo(10);
+        org.mockito.Mockito.verify(provider).complete(org.mockito.ArgumentMatchers.argThat(request ->
+                request.systemPrompt().contains("Create exactly 9")));
     }
 
     private UUID owner(String label) {

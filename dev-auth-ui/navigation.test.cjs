@@ -15,7 +15,410 @@ const detail = scenario => ({ conversation: conversation(scenario), messages: [
   { role: "ASSISTANT", content: "A scenario-specific opening." },
   { role: "USER", content: "An existing answer." }
 ] });
+const conversationEvaluation = (status = "SUCCESS") => ({ conversationId: id, status,
+  scores: { communication: 82, grammar: 74, vocabulary: 78, fluency: 80, relevance: 80, overall: 79 },
+  strengths: ["Você manteve o contexto."], improvements: ["Varie os conectores."], evaluatedAt: "2026-09-16T12:00:00Z" });
+
+for (const mode of ["text", "voice"]) {
+  test(`Conversation completion in ${mode} shows persisted scores and blocks new messages`, async () => {
+    const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: conversationEvaluation() }
+      : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+    await ui.run(`openConversation("${id}")`);
+    await ui.run(`$("chat-mode").value = "${mode}"`);
+    assert.equal(ui.get("complete-conversation").disabled, false);
+    await ui.get("complete-conversation").click();
+    assert.equal(ui.state().currentConversation.endedAt, conversationEvaluation().evaluatedAt);
+    assert.equal(ui.get("conversation-evaluation").hidden, false);
+    const content = ui.get("conversation-evaluation").children;
+    assert.equal(content[2].textContent, "Desempenho geral: 79/100");
+    assert.deepEqual(content[3].children.map(el => el.textContent), ["Comunicação", "82", "Gramática", "74", "Vocabulário", "78", "Fluência linguística", "80", "Relevância", "80"]);
+    assert.equal(content[5].children[0].textContent, "Você manteve o contexto.");
+    assert.equal(content[7].children[0].textContent, "Varie os conectores.");
+    assert.equal(ui.get("send-chat").disabled, true);
+    assert.equal(ui.get("chat-form").hidden, true);
+    assert.equal(ui.get("record-chat").disabled, true);
+    await ui.run('sendChatMessage("Hello", "en", { generation: conversationGeneration }); toggleRecording()');
+    await ui.get("complete-conversation").click();
+    assert.equal(ui.calls.filter(req => req.path.endsWith("/complete")).length, 1);
+    assert.equal(ui.calls.some(req => req.path.endsWith("/messages/stream")), false);
+  });
+}
+
+test("Insufficient conversation remains active and can continue", async () => {
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: { conversationId: id, status: "INSUFFICIENT", minimumUserMessages: 4, currentUserMessages: 2 } }
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  await ui.get("complete-conversation").click();
+  assert.match(ui.get("conversation-completion-status").textContent, /2 de 4/);
+  assert.equal(ui.get("conversation-evaluation").hidden, true);
+  assert.equal(ui.get("send-chat").disabled, false);
+  assert.equal(ui.get("chat-form").hidden, false);
+  assert.equal(ui.get("complete-conversation").disabled, false);
+  assert.equal(ui.state().currentConversation.endedAt, undefined);
+});
+
+test("Completion loading prevents duplicate requests and sending while evaluating", async () => {
+  let resolve;
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? new Promise(r => resolve = r)
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  const pending = ui.get("complete-conversation").click();
+  assert.equal(ui.get("complete-conversation").textContent, "Avaliando sua conversa...");
+  assert.equal(ui.get("send-chat").disabled, true);
+  await ui.get("complete-conversation").click();
+  assert.equal(ui.calls.filter(req => req.path.endsWith("/complete")).length, 1);
+  resolve({ body: conversationEvaluation() }); await pending;
+});
+
+test("NEEDS_PRACTICE remains constructive and feedback is rendered as text", async () => {
+  const result = { ...conversationEvaluation("NEEDS_PRACTICE"), strengths: ["<img src=x onerror=alert(1)>"] };
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: result }
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  assert.match(ui.get("conversation-evaluation").children[1].textContent, /Continue praticando/);
+  const item = ui.get("conversation-evaluation").children[5].children[0];
+  assert.equal(item.textContent, result.strengths[0]);
+  assert.equal(item.children.length, 0);
+});
+
+test("Reopening an ended conversation restores history and evaluation without another POST", async () => {
+  const stored = detail("RESTAURANT"); stored.conversation.endedAt = conversationEvaluation().evaluatedAt; stored.evaluation = conversationEvaluation();
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("conversation-evaluation").hidden, false);
+  assert.equal(ui.get("chat-messages").children.length, 2);
+  assert.equal(ui.get("complete-conversation").textContent, "Conversa concluída");
+  assert.equal(ui.get("send-chat").disabled, true);
+  assert.equal(ui.calls.some(req => req.method === "POST"), false);
+  assert.deepEqual(assistantActionLabels(ui.get("chat-messages").children[0]), ["Traduzir", "Ouvir"]);
+});
+
+test("Ended conversation evaluation starts expanded and can be collapsed without a request", async () => {
+  const stored = detail("RESTAURANT"); stored.conversation.endedAt = conversationEvaluation().evaluatedAt; stored.evaluation = conversationEvaluation();
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  await ui.run(`openConversation("${id}")`);
+  const evaluation = ui.get("conversation-evaluation"), toggle = evaluation.children[0].children[0], before = ui.calls.length;
+  assert.equal(toggle.textContent, "Recolher");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  await toggle.click();
+  assert.equal(evaluation.classList.contains("is-collapsed"), true);
+  assert.equal(evaluation.children[1].hidden, true);
+  assert.equal(toggle.textContent, "Expandir");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(ui.get("chat-messages").children.length, 2);
+  await toggle.click();
+  assert.equal(evaluation.children[1].hidden, false);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(ui.calls.length, before);
+});
+
+test("Active conversation keeps the composer visible after the layout change", async () => {
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("view-chat").hidden, false);
+  assert.equal(ui.get("chat-form").hidden, false);
+  assert.ok(ui.get("chat-message"));
+  assert.equal(ui.get("send-chat").disabled, false);
+  assert.equal(ui.get("record-chat").disabled, false);
+  assert.equal(ui.get("conversation-evaluation").hidden, true);
+});
+
+test("Ended conversation keeps evaluation and its scores visible above the fold", async () => {
+  const stored = detail("RESTAURANT"); stored.conversation.endedAt = conversationEvaluation().evaluatedAt; stored.evaluation = conversationEvaluation();
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  await ui.run(`openConversation("${id}")`);
+  const evaluation = ui.get("conversation-evaluation");
+  assert.equal(evaluation.hidden, false);
+  assert.equal(evaluation.children[0].children[0].textContent, "Recolher");
+  assert.match(evaluation.children[3].children.map(element => element.textContent).join(" "), /Comunicação/);
+  assert.match(evaluation.children[3].children.map(element => element.textContent).join(" "), /Gramática/);
+  assert.match(evaluation.children[3].children.map(element => element.textContent).join(" "), /Vocabulário/);
+  assert.match(evaluation.children[3].children.map(element => element.textContent).join(" "), /Fluência linguística/);
+  assert.match(evaluation.children[3].children.map(element => element.textContent).join(" "), /Relevância/);
+  assert.equal(ui.get("chat-form").hidden, true);
+});
+
+test("Active conversation has no evaluation toggle and switching conversations resets visual state", async () => {
+  const otherId = "22222222-2222-4222-8222-222222222222";
+  const ended = detail("RESTAURANT"); ended.conversation.endedAt = conversationEvaluation().evaluatedAt; ended.evaluation = conversationEvaluation();
+  const active = detail("FREE_TALK"); active.conversation.id = otherId;
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: ended }
+    : req.path === `/api/v1/conversations/${otherId}` ? { body: active } : null });
+  await ui.run(`openConversation("${id}")`);
+  const toggle = ui.get("conversation-evaluation").children[0].children[0]; await toggle.click();
+  await ui.run(`openConversation("${otherId}")`);
+  assert.equal(ui.get("conversation-evaluation").children.length, 0);
+  assert.equal(ui.get("conversation-evaluation").hidden, true);
+  assert.equal(ui.get("chat-messages").children.length, 2);
+  assert.equal(ui.get("conversation-evaluation").querySelectorAll("button").length, 0);
+});
+
+test("Conversation messages keep a viewport-based internal scroll region", async () => {
+  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.chat-messages[^}]*overflow-y:\s*auto/);
+  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /#view-chat \.chat-card[^}]*min-height:\s*0/);
+  assert.equal(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8").includes(".chat-messages { min-height: clamp"), false);
+  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.conversation-evaluation[^}]*max-height:\s*min\(/);
+});
+
+test("Login hero uses the provided photo and no longer includes the decorative chat card", () => {
+  const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+  assert.equal(html.includes('class="auth-preview"'), false);
+  assert.equal(html.includes("What would you like to talk about today?"), false);
+  assert.match(html, /class="brand-panel"/);
+  for (const text of ["EnglishAI", "PRATIQUE INGLÊS COM CONFIANÇA", "Converse. Aprenda. Evolua."]) assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const text of ["PALAVRAS QUE ABREM CAMINHOS", "Mais confiança.", "Um espaço para praticar, experimentar e aprender inglês com a ajuda da IA.", "Converse. Descubra. Vá mais longe."]) assert.equal(html.includes(text), false);
+  assert.match(html, /id="login-form"/);
+  assert.match(styles, /\.brand-panel[^}]*background-image:\s*url\("assets\/login-hero\.png"\)/);
+  assert.match(styles, /\.brand-panel[^}]*background-size:\s*cover/);
+  assert.match(styles, /\.brand-panel[^}]*background-position:\s*58%\s+center/);
+  assert.doesNotMatch(styles, /\.brand-panel::before\s*\{/);
+  assert.doesNotMatch(styles, /\.brand-story::before[^}]*radial-gradient/);
+  assert.match(styles, /\.brand-story[^}]*max-width:\s*290px/);
+  assert.match(styles, /\.brand-message[^}]*font-size:\s*1\.15rem/);
+  assert.doesNotMatch(styles, /\.auth-preview\s*\{/);
+});
+
+test("Historical evaluation without relevance renders a dash", async () => {
+  const stored = detail("RESTAURANT"); stored.conversation.endedAt = conversationEvaluation().evaluatedAt;
+  stored.evaluation = conversationEvaluation(); delete stored.evaluation.scores.relevance;
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("conversation-evaluation").children[3].children[9].textContent, "—");
+});
+
+test("Failed evaluation keeps session and history and permits retry", async () => {
+  let attempts = 0;
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? ++attempts === 1 ? { status: 503 } : { body: conversationEvaluation() }
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  assert.equal(ui.state().currentUser.id, "owner");
+  assert.equal(ui.get("chat-messages").children.length, 2);
+  assert.equal(ui.get("send-chat").disabled, false);
+  assert.match(ui.get("conversation-completion-status").textContent, /tentar novamente/);
+  await ui.get("complete-conversation").click();
+  assert.equal(ui.get("conversation-evaluation").hidden, false);
+});
+
+test("Pending stream or recording blocks completion without cancelling the turn", async () => {
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  for (const state of ['activeChat = { controller: new AbortController() }', 'activeChat = null; recordingOperation = { kind: "chat" }']) {
+    await ui.run(state + '; updateConversationControls()');
+    assert.equal(ui.get("complete-conversation").disabled, true);
+    await ui.get("complete-conversation").click();
+  }
+  assert.equal(ui.calls.some(req => req.path.endsWith("/complete")), false);
+});
+
+test("Logout and another account discard pending evaluation and old result", async () => {
+  let resolve;
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? new Promise(r => resolve = r)
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  const pending = ui.get("complete-conversation").click();
+  await ui.run('showLogin(); appState.currentUser = { id: "another-owner" };');
+  resolve({ body: conversationEvaluation() }); await pending;
+  assert.equal(ui.state().currentConversation, null);
+  assert.equal(ui.get("conversation-evaluation").hidden, true);
+  assert.equal(ui.get("conversation-evaluation").children.length, 0);
+  assert.equal(ui.run("conversationCompletion"), null);
+});
+
+test("Completing a conversation stops shared TTS and releases its ObjectURL", async () => {
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: conversationEvaluation() }
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  await ui.run('globalThis.completionAudio = new Audio("blob:test"); globalThis.completionController = new AbortController(); currentSpeech = { controller: completionController, audio: completionAudio, url: "blob:test", button: $("send-chat"), voice: true, generation: conversationGeneration };');
+  await ui.get("complete-conversation").click();
+  assert.equal(ui.run("completionAudio.paused"), true);
+  assert.equal(ui.run("completionController.signal.aborted"), true);
+  assert.equal(ui.run("currentSpeech"), null);
+});
+
+test("Completion authentication failure clears account and evaluation state", async () => {
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { status: 401 }
+    : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  assert.equal(ui.state().currentUser, null);
+  assert.equal(ui.state().currentConversation, null);
+  assert.equal(ui.get("conversation-evaluation").children.length, 0);
+});
+
+function progressReply(request) {
+  if (request.path === "/api/v1/progress") return { body: progressData("ALL_TIME") };
+  if (request.path === "/api/v1/progress/timeline") return { body: progressTimeline };
+  return null;
+}
+test("Meu Progresso opens with ALL_TIME and renders the three read-only areas", async () => {
+  const ui=await app({handle:progressReply}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.state().currentView,"progress"); assert.equal(ui.get("view-progress").hidden,false); assert.equal(ui.get("progress-content").hidden,false);
+  assert.equal(ui.get("progress-conversations").textContent,"8"); assert.equal(ui.get("progress-readings").textContent,"10"); assert.equal(ui.get("progress-new-words").textContent,"37"); assert.equal(ui.get("progress-mastered").textContent,"28");
+  assert.equal(ui.get("progress-conversation-difficulty").children.length,2); assert.equal(ui.get("progress-reading-difficulty").children.length,1); assert.equal(ui.get("progress-timeline").children.length,6);
+  assert.equal(ui.calls.filter(r=>r.path==="/api/v1/progress").length,1); assert.equal(ui.calls.filter(r=>r.path==="/api/v1/progress/timeline").length,1);
+});
+test("Loading rápido não produz flash e termina com a região livre", async () => {
+  const ui = await app({ handle: progressReply });
+  await ui.click("Meu Progresso");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-loading").hidden, true);
+  assert.equal(ui.get("progress-loading").getAttribute("aria-busy"), "false");
+  assert.equal(ui.get("progress-content").hidden, false);
+});
+test("Loading lento do Progress aparece e desaparece após os dados", async () => {
+  let release;
+  const ui = await app({ handle: req => req.path === "/api/v1/progress" ? new Promise(resolve => { release = resolve; }) : progressReply(req) });
+  const opening = ui.click("Meu Progresso");
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.equal(ui.get("progress-loading").hidden, false);
+  assert.equal(ui.get("progress-loading").getAttribute("aria-busy"), "true");
+  assert.equal(ui.get("progress-content").hidden, true);
+  release({ body: progressData("ALL_TIME") });
+  await opening; await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-loading").hidden, true);
+  assert.equal(ui.get("progress-loading").getAttribute("aria-busy"), "false");
+  assert.equal(ui.get("progress-content").hidden, false);
+});
+test("Falha do Progress encerra o loading e mostra erro", async () => {
+  const ui = await app({ handle: req => req.path === "/api/v1/progress" ? { status: 503 } : progressReply(req) });
+  await ui.click("Meu Progresso");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-loading").hidden, true);
+  assert.equal(ui.get("progress-loading").getAttribute("aria-busy"), "false");
+  assert.match(ui.get("progress-status").textContent, /temporariamente indisponível|Não foi possível/);
+});
+test("Troca de view encerra o loading antigo e ignora o Progress tardio", async () => {
+  let release;
+  const ui = await app({ handle: req => req.path === "/api/v1/progress" ? new Promise(resolve => { release = resolve; }) : progressReply(req) });
+  const opening = ui.click("Meu Progresso");
+  await new Promise(resolve => setTimeout(resolve, 220));
+  await ui.run('showView("home")');
+  assert.equal(ui.get("progress-loading").hidden, true);
+  assert.equal(ui.get("progress-loading").getAttribute("aria-busy"), "false");
+  release({ body: progressData("ALL_TIME") });
+  await opening;
+  assert.equal(ui.state().currentView, "home");
+  assert.equal(ui.get("progress-content").hidden, true);
+});
+test("Progress period filters are explicit and backend remains the authority", async () => {
+  const ui=await app({handle:progressReply});
+  await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  await ui.run('document.querySelectorAll = () => []; progressPeriod = "CURRENT_MONTH"; loadProgress()'); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.run("progressPeriod"),"CURRENT_MONTH"); assert.equal(ui.get("progress-content").hidden,false);
+});
+test("Progress empty data keeps sections visible, uses em dash, and shows no alert", async () => {
+  const empty={period:"ALL_TIME",periodStart:null,periodEnd:"2026-09-16T12:00:00Z",overview:{conversationsCompleted:0,readingsCompleted:0,wordsFirstSeen:0,wordsMasteredCurrent:0},conversation:{totalEvaluated:0,successCount:0,needsPracticeCount:0,successRate:null,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null,byDifficulty:[]},reading:{totalCompleted:0,successCount:0,needsPracticeCount:0,successRate:null,averageComprehension:null,byDifficulty:[]},vocabulary:{totalWords:0,newCount:0,learningCount:0,reviewingCount:0,masteredCount:0,dueForReview:0,wordsFirstSeenInPeriod:0,wordsReviewedInPeriod:0}};
+  const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:empty}:progressReply(req)}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.get("progress-conversations").textContent, "0"); assert.equal(ui.get("progress-readings").textContent, "0"); assert.equal(ui.get("progress-word-count").textContent, "0"); assert.equal(ui.get("progress-conversation-average").textContent,"—"); assert.equal(ui.get("progress-reading-average").textContent,"—"); assert.equal(ui.state().currentUser.id,"owner");
+  assert.equal(ui.get("progress-status").textContent, "");
+});
+test("Progress request failure still shows the real error", async () => {
+  const ui = await app({ handle: req => { if (req.path === "/api/v1/progress") throw new Error("network"); return progressReply(req); } });
+  await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-status").textContent, "Não foi possível carregar seu progresso. Tente novamente.");
+});
+test("Progress render failure still shows the real error", async () => {
+  const ui = await app({ handle: progressReply });
+  await ui.run('renderProgress = () => { throw new Error("render"); }; showView("progress")'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-status").textContent, "Não foi possível carregar seu progresso. Tente novamente.");
+});
+test("Progress accepts null comparison and empty timeline metrics from a successful API response", async () => {
+  const empty={period:"ALL_TIME",periodStart:null,periodEnd:"2026-09-16T12:00:00Z",overview:{conversationsCompleted:0,readingsCompleted:0,wordsFirstSeen:0,wordsMasteredCurrent:0},conversation:{totalEvaluated:0,successCount:0,needsPracticeCount:0,successRate:null,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null,byDifficulty:null},reading:{totalCompleted:0,successCount:0,needsPracticeCount:0,successRate:null,averageComprehension:null,byDifficulty:null},vocabulary:{totalWords:0,newCount:0,learningCount:0,reviewingCount:0,masteredCount:0,dueForReview:0,wordsFirstSeenInPeriod:0,wordsReviewedInPeriod:0},comparison:null};
+  const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:empty}:{body:{points:[{period:"2026-09",conversation:null,reading:null,vocabulary:null}]}}}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.get("progress-content").hidden,false); assert.equal(ui.get("progress-timeline").children.length,1); assert.match(ui.get("progress-timeline").children[0].children[1].textContent,/Conversação: — \(0\)/);
+});
+test("Sidebar exposes learning tools and uses an internal scroll region", () => {
+  for (const view of ["home","chat","reading","vocabulary","translate","correct","scenarios","conversations","progress","profile"]) assert.match(html, new RegExp(`data-view="${view}"`));
+  assert.equal(html.includes('data-view="account"'), false); assert.match(fs.readFileSync(path.join(__dirname,"styles.css"),"utf8"),/\.sidebar nav[^}]*overflow-y:\s*auto/);
+});
+test("Stale progress response cannot replace a newer account or filter", async () => {
+  let release; const ui=await app({handle:req=>req.path==="/api/v1/progress"?new Promise(resolve=>release=resolve):progressReply(req)});
+  const opening=ui.click("Meu Progresso"); await ui.run('appState.currentUser = { id: "other" }; resetProgress(); showView("home")'); release({body:progressData()}); await opening;
+  assert.equal(ui.state().currentView,"home"); assert.equal(ui.get("progress-content").hidden,true); assert.equal(ui.run("progressRequest"),null);
+});
+test("Progress renders mixed persisted data when conversation is absent", async () => {
+  const payload={period:"ALL_TIME",periodStart:null,periodEnd:"2026-09-17T06:00:11Z",overview:{conversationsCompleted:0,readingsCompleted:1,wordsFirstSeen:20,wordsMasteredCurrent:0},conversation:{totalEvaluated:0,successCount:0,needsPracticeCount:0,successRate:null,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null,byDifficulty:[{difficulty:"BEGINNER",count:0,successCount:0,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null},{difficulty:"INTERMEDIATE",count:0,successCount:0,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null},{difficulty:"ADVANCED",count:0,successCount:0,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null}]},reading:{totalCompleted:1,successCount:0,needsPracticeCount:1,successRate:0,averageComprehension:33,byDifficulty:[{difficulty:"BEGINNER",count:1,successCount:0,averageComprehension:33},{difficulty:"INTERMEDIATE",count:0,successCount:0,averageComprehension:null},{difficulty:"ADVANCED",count:0,successCount:0,averageComprehension:null}]},vocabulary:{totalWords:20,newCount:15,learningCount:4,reviewingCount:1,masteredCount:0,dueForReview:0,wordsFirstSeenInPeriod:20,wordsReviewedInPeriod:0},comparison:null};
+  const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:payload}:{body:{points:[{period:"2026-09",conversation:null,reading:{count:1,average:33},vocabulary:{wordsFirstSeen:20}}]}}});
+  await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.get("progress-content").hidden,false); assert.equal(ui.get("progress-conversation-average").textContent,"—"); assert.equal(ui.get("progress-reading-average").textContent,"33%"); assert.equal(ui.get("progress-conversation-difficulty").children.length,3); assert.equal(ui.get("progress-status").textContent, "");
+});
+
+test("Progress renders the current backend payload with nullable averages", async () => {
+  const payload = { ...progressData(), periodStart: null, overview: { conversationsCompleted: 0, readingsCompleted: 1, wordsFirstSeen: 20, wordsMasteredCurrent: 0 }, conversation: { totalEvaluated: 0, successCount: 0, needsPracticeCount: 0, successRate: null, averageOverall: null, averageCommunication: null, averageGrammar: null, averageVocabulary: null, averageFluency: null, byDifficulty: [{ difficulty: "ADVANCED", count: 0, successCount: 0, averageOverall: null }, { difficulty: "BEGINNER", count: 0, successCount: 0, averageOverall: null }, { difficulty: "INTERMEDIATE", count: 0, successCount: 0, averageOverall: null }] }, reading: { totalCompleted: 1, successCount: 0, needsPracticeCount: 1, successRate: 0, averageComprehension: 33.0, byDifficulty: [{ difficulty: "ADVANCED", count: 0, successCount: 0, averageComprehension: null }, { difficulty: "BEGINNER", count: 1, successCount: 0, averageComprehension: 33.0 }, { difficulty: "INTERMEDIATE", count: 0, successCount: 0, averageComprehension: null }] }, vocabulary: { totalWords: 20, newCount: 15, learningCount: 4, reviewingCount: 1, masteredCount: 0, dueForReview: 0, wordsFirstSeenInPeriod: 20, wordsReviewedInPeriod: 0 }, comparison: null };
+  const timeline = { points: ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"].map(period => ({ period, conversation: { count: 0, average: null }, reading: { count: period === "2026-09" ? 1 : 0, average: period === "2026-09" ? 33.0 : null }, vocabulary: { wordsFirstSeen: period === "2026-09" ? 20 : 0 } })) };
+  const ui = await app({ handle: req => req.path === "/api/v1/progress" ? { body: payload } : { body: timeline } });
+  await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-content").hidden, false); assert.equal(ui.get("progress-reading-average").textContent, "33%"); assert.equal(ui.get("progress-conversation-average").textContent, "—"); assert.equal(ui.get("progress-timeline").children.length, 6);
+});
+test("Progress reset preserves the real DOM structure and allows reopening", async () => {
+  const ui = await app({ handle: progressReply });
+  const required = ["progress-content", "progress-conversations", "progress-readings", "progress-vocabulary", "progress-timeline", "progress-status"];
+  await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  await ui.run('showView("home")');
+  assert.ok(required.every(id => ui.run(`document.getElementById("${id}")`) !== null));
+  assert.equal(ui.get("progress-conversations").textContent, "");
+  assert.equal(ui.get("progress-timeline").children.length, 0);
+  await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("progress-content").hidden, false);
+  assert.equal(ui.get("progress-conversations").textContent, "8");
+});
+test("Repeated Progress navigation keeps all required elements available", async () => {
+  const ui = await app({ handle: progressReply });
+  for (let i = 0; i < 3; i++) {
+    await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.get("progress-conversations").textContent, "8");
+    await ui.run('showView("home")');
+    assert.ok(ui.run('document.getElementById("progress-conversations") !== null'));
+  }
+});
+test("Progress renderer IDs exist in the real index HTML", () => {
+  const expected = [...html.matchAll(/progressElement\("([^"]+)"\)|\bset\("(progress-[^"]+)"/g)].map(match => match[1] || match[2]);
+  const actual = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  assert.deepEqual([...new Set(expected)].filter(id => !actual.has(id)), []);
+});
+
 const assistantActionLabels = item => item.children.find(child => child.className === "chat-actions")?.children.map(child => child.textContent);
+
+function refreshedResponse(request) {
+  if (request.path === "/api/v1/auth/refresh") return { body: { accessToken: "renewed-access", refreshToken: "renewed-refresh" } };
+  return null;
+}
+
+test("Progress keeps its view when an expired access token is refreshed", async () => {
+  let expired = true;
+  const ui = await app({ authenticated: true, handle: request => {
+    if (request.path === "/api/v1/progress" && expired) { expired = false; return { status: 401 }; }
+    if (request.path === "/api/v1/progress" || request.path === "/api/v1/progress/timeline") return progressReply(request);
+    return refreshedResponse(request);
+  }});
+  await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.state().currentView, "progress");
+  assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/refresh").length, 1);
+  assert.equal(ui.get("progress-content").hidden, false);
+});
+
+test("Reading keeps its view when an expired access token is refreshed", async () => {
+  let expired = true;
+  const ui = await app({ authenticated: true, handle: request => {
+    if (request.path === "/api/v1/reading/generate" && expired) { expired = false; return { status: 401 }; }
+    if (request.path === "/api/v1/reading/generate") return { body: { text: readingText, difficulty: "INTERMEDIATE", topic: "DAILY_LIFE" } };
+    return refreshedResponse(request);
+  }});
+  await ui.click("Leitura"); await ui.run('generateReading()'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.state().currentView, "reading");
+  assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/refresh").length, 1);
+});
+
+test("Conversation keeps its view when an expired access token is refreshed", async () => {
+  let expired = true;
+  const ui = await app({ authenticated: true, handle: request => {
+    if (request.path === `/api/v1/conversations/${id}` && expired) { expired = false; return { status: 401 }; }
+    if (request.path === `/api/v1/conversations/${id}`) return { body: detail("JOB_INTERVIEW") };
+    return refreshedResponse(request);
+  }});
+  await ui.run('appState.currentUser = { id: "owner" };'); await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.state().currentView, "chat");
+  assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/refresh").length, 1);
+});
 
 const readingText = "Anna walks to school every morning. She enjoys talking to her friends along the way.";
 const readingReply = request => request.path === "/api/v1/reading/generate"
@@ -51,6 +454,9 @@ const vocabularyReply = request => request.path === "/api/v1/vocabulary/today" ?
   } } }
   : request.path === "/api/v1/speech" ? { body: new Blob(["wav"], { type: "audio/wav" }) }
   : null;
+
+const progressData = period => ({ period: period || "ALL_TIME", periodStart: "2026-01-01T00:00:00Z", periodEnd: "2026-09-16T12:00:00Z", overview: { conversationsCompleted: 8, readingsCompleted: 10, wordsFirstSeen: 37, wordsMasteredCurrent: 28 }, conversation: { totalEvaluated: 8, successCount: 6, needsPracticeCount: 2, successRate: 75, averageOverall: 78, averageCommunication: 82, averageGrammar: 72, averageVocabulary: 77, averageFluency: 80, byDifficulty: [{ difficulty: "BEGINNER", count: 0, successCount: 0, averageOverall: null }, { difficulty: "INTERMEDIATE", count: 8, successCount: 6, averageOverall: 78 }] }, reading: { totalCompleted: 10, successCount: 8, needsPracticeCount: 2, successRate: 80, averageComprehension: 82, byDifficulty: [{ difficulty: "BEGINNER", count: 10, successCount: 8, averageComprehension: 82 }] }, vocabulary: { totalWords: 184, newCount: 42, learningCount: 51, reviewingCount: 63, masteredCount: 28, dueForReview: 12, wordsFirstSeenInPeriod: 37, wordsReviewedInPeriod: 24 } });
+const progressTimeline = { points: ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"].map(period => ({ period, conversation: { count: period === "2026-06" ? 0 : 2, average: period === "2026-06" ? null : 70 }, reading: { count: 1, average: 75 }, vocabulary: { wordsFirstSeen: 3 } })) };
 
 async function openVocabulary(ui) {
   await ui.click("Vocabulário");
@@ -355,6 +761,32 @@ test("Reading generates and grades exactly three comprehension questions once", 
   assert.equal(ui.calls.filter(r => r.path === "/api/v1/reading/questions").length, 1);
 });
 
+test("Reading submit sends the activity request through the authenticated helper", async () => {
+  const questionIds = ["21111111-1111-4111-8111-111111111111", "31111111-1111-4111-8111-111111111111", "41111111-1111-4111-8111-111111111111"];
+  const ui = await app({ authenticated: true, handle: req => req.path.endsWith("/submit")
+    ? { body: { activityId: id, correctAnswers: 3, totalQuestions: 3, percentage: 100, status: "SUCCESS", difficulty: "INTERMEDIATE" } } : readingReply(req) });
+  await ui.run(`readingState.current = { activityId: "${id}", text: "Reading", difficulty: "INTERMEDIATE" }; readingState.questions = ${JSON.stringify(questionIds.map((questionId, index) => ({ id: questionId, question: `Q${index}`, options: ["A", "B", "C", "D"], correctOption: 0, explanation: "ok" })))}; readingState.answers = new Map([[0, 0], [1, 0], [2, 0]]);`);
+  await ui.run("submitReadingActivity()");
+  const submit = ui.calls.find(req => req.path.endsWith("/submit"));
+  assert.ok(submit);
+  assert.equal(submit.headers.Authorization, "Bearer test-access");
+  assert.equal(submit.body.answers.length, 3);
+});
+
+test("Reading submit retries once after an expired access token using refresh", async () => {
+  let submits = 0;
+  const ui = await app({ authenticated: true, handle: req => {
+    if (req.path.endsWith("/submit")) return ++submits === 1 ? { status: 401 } : { body: { activityId: id, correctAnswers: 2, totalQuestions: 3, percentage: 67, status: "SUCCESS", difficulty: "INTERMEDIATE" } };
+    if (req.path === "/api/v1/auth/refresh") return { body: { accessToken: "renewed-access", refreshToken: "renewed-refresh" } };
+    return readingReply(req);
+  }});
+  await ui.run(`readingState.current = { activityId: "${id}", text: "Reading", difficulty: "INTERMEDIATE" }; readingState.questions = ${JSON.stringify([1, 2, 3].map((n, index) => ({ id: `${n}1111111-1111-4111-8111-111111111111`, question: `Q${index}`, options: ["A", "B", "C", "D"], correctOption: 0, explanation: "ok" })))}; readingState.answers = new Map([[0, 0], [1, 0], [2, 0]]);`);
+  await ui.run("submitReadingActivity()");
+  assert.equal(submits, 2);
+  assert.equal(ui.storage.get("englishai_access_token"), "renewed-access");
+  assert.equal(ui.state().currentUser.id, "owner");
+});
+
 for (const [level, expected] of [["A1", "BEGINNER"], ["A2", "BEGINNER"], ["B1", "INTERMEDIATE"], ["B2", "INTERMEDIATE"], ["C1", "ADVANCED"], ["C2", "ADVANCED"], [null, "INTERMEDIATE"]]) {
   test(`Reading reuses the profile recommendation for ${level}`, async () => {
     const ui = await app({ handle: readingReply });
@@ -461,7 +893,7 @@ test("Reading retains text when TTS or hints fail, including malformed hint fall
 // The DOM and HTTP boundary are fake; no packages, browser credentials or real LLM are needed.
 class Element {
   constructor(id = "") {
-    Object.assign(this, { id, children: [], dataset: {}, handlers: {}, attributes: {}, value: "", hidden: true, disabled: false, textContent: "" });
+    Object.assign(this, { id, children: [], parentElement: null, detached: false, dataset: {}, handlers: {}, attributes: {}, value: "", hidden: true, disabled: false, textContent: "" });
     const classes = new Set();
     this.classList = { add: (...x) => x.forEach(c => classes.add(c)), remove: (...x) => x.forEach(c => classes.delete(c)),
       contains: x => classes.has(x), toggle: (x, force) => { if (force ?? !classes.has(x)) classes.add(x); else classes.delete(x); } };
@@ -469,9 +901,10 @@ class Element {
   addEventListener(type, handler) { (this.handlers[type] ??= []).push(handler); }
   setAttribute(name, value) { this.attributes[name] = value; }
   getAttribute(name) { return this.attributes[name]; }
-  append(...children) { children.forEach(child => { child.parentElement = this; this.children.push(child); }); }
+  append(...children) { children.forEach(child => { child.parentElement = this; child.detached = false; this.children.push(child); }); }
   appendChild(child) { this.append(child); }
-  replaceChildren(...children) { this.children = []; this.append(...children); }
+  replaceChildren(...children) { this.children.forEach(child => child.detach()); this.children = []; this.append(...children); }
+  detach() { this.detached = true; this.children.forEach(child => child.detach()); this.parentElement = null; }
   replaceWith() {}
   remove() {}
   scrollTo() {}
@@ -489,6 +922,8 @@ class FakeAudio {
 async function app({ authenticated = false, handle } = {}) {
   const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(m => [m[1], new Element(m[1])]));
   const get = key => { assert.ok(elements.has(key), `DOM id exists: ${key}`); return elements.get(key); };
+  const progressStructure = [...elements.keys()].filter(id => id.startsWith("progress-") && id !== "progress-content");
+  get("progress-content").append(...progressStructure.map(get));
   const nav = [...html.matchAll(/<button\b([^>]*data-view="([^"]+)"[^>]*)>([\s\S]*?)<\/button>/g)].map(m => {
     const el = new Element(); el.dataset.view = m[2]; el.textContent = m[3].replace(/<[^>]+>/g, "").trim(); return el;
   });
@@ -498,14 +933,14 @@ async function app({ authenticated = false, handle } = {}) {
   const storage = new Map(authenticated ? [["englishai_access_token", "test-access"], ["englishai_refresh_token", "test-refresh"]] : []);
   const calls = [];
   const sandbox = {
-    document: { getElementById: get, createElement: () => new Element(), head: new Element(),
+    document: { getElementById: id => { const element = elements.get(id); return element?.detached ? null : element; }, createElement: () => new Element(), head: new Element(),
       querySelectorAll: selector => selector === ".page-view" ? pages : selector === "[data-view]" ? nav
         : selector.startsWith('[data-view="') ? nav.filter(el => selector === `[data-view="${el.dataset.view}"]`) : [] },
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }), confirm: () => true },
     navigator: {}, sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     performance, AbortController, FormData, Blob, Event, TextDecoder, TextEncoder, URL, Audio: FakeAudio, setTimeout, clearTimeout, console,
     fetch: async (url, options = {}) => {
-      const request = { path: new URL(url).pathname, method: options.method ?? "GET", body: typeof options.body === "string" ? JSON.parse(options.body) : undefined };
+      const request = { path: new URL(url).pathname, method: options.method ?? "GET", headers: options.headers || {}, body: typeof options.body === "string" ? JSON.parse(options.body) : undefined };
       calls.push(request);
       const custom = await handle?.(request);
       if (custom) return new Response(JSON.stringify(custom.body ?? {}), { status: custom.status ?? 200 });
@@ -525,6 +960,8 @@ async function app({ authenticated = false, handle } = {}) {
 
 test("Home CTA navigates to Scenarios and never creates a conversation", async () => {
   const ui = await app(); await ui.run('showView("home")'); await ui.click("Começar uma conversa");
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.state().currentView, "scenarios"); assert.equal(ui.get("view-chat").hidden, true);
   assert.equal(ui.get("scenario-list").children.length, 3);
   assert.equal(ui.calls.filter(r => r.method === "POST").length, 0);
@@ -626,10 +1063,76 @@ test("Missing scenario never creates FREE_TALK implicitly", async () => {
   assert.equal(ui.calls.filter(req => req.method === "POST").length, 0);
 });
 
-test("Authenticated browser refresh starts at Scenarios with no invented selection", async () => {
+test("Authenticated browser refresh starts at Home with no invented selection", async () => {
   const ui = await app({ authenticated: true });
-  assert.equal(ui.state().currentView, "scenarios"); assert.equal(ui.state().currentConversation, null);
+  assert.equal(ui.state().currentView, "home"); assert.equal(ui.state().currentConversation, null);
   assert.equal(ui.get("view-chat").hidden, true); assert.equal(ui.calls.filter(req => req.method === "POST").length, 0);
+});
+
+test("A normal authenticated entry also starts at Home", async () => {
+  const ui = await app();
+  ui.storage.set("englishai_access_token", "new-login-access"); ui.storage.set("englishai_refresh_token", "new-login-refresh");
+  await ui.run("showHome()");
+  assert.equal(ui.state().currentView, "home");
+  assert.equal(ui.state().currentConversation, null);
+});
+
+test("Sidebar separates new conversation from conversation history", async () => {
+  const ui = await app({ authenticated: true });
+  assert.equal(ui.nav.filter(button => button.dataset.view === "chat").length, 2); // Home content CTAs only; the sidebar has no chat destination.
+  assert.ok(ui.nav.some(button => button.dataset.view === "scenarios" && button.textContent.includes("Nova conversa")));
+  await ui.click("Nova conversa");
+  assert.equal(ui.state().currentView, "scenarios");
+  await ui.click("Conversas");
+  assert.equal(ui.state().currentView, "conversations");
+});
+
+test("New conversation clears the previous conversation without deleting it", async () => {
+  const ui = await app({ authenticated: true, handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
+  await ui.run('appState.currentUser = { id: "owner" };');
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.state().currentConversation.id, id);
+  await ui.click("Nova conversa"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.state().currentConversation, null);
+  assert.equal(ui.state().currentView, "scenarios");
+  assert.equal(ui.calls.filter(request => request.method === "DELETE").length, 0);
+});
+
+test("Conversation opened from history keeps history active", async () => {
+  const ui = await app({ authenticated: true, handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
+  await ui.run('showView("conversations")');
+  await ui.get("conversation-list").children[0].children.at(-1).children[0].click();
+  assert.equal(ui.state().currentView, "chat");
+  assert.equal(ui.nav.find(button => button.dataset.view === "conversations").classList.contains("active"), true);
+  assert.equal(ui.nav.find(button => button.dataset.view === "scenarios").classList.contains("active"), false);
+});
+
+test("Conversation history distinguishes active and ended entries and hides ended deletion", async () => {
+  const active = { ...conversation("FREE_TALK"), id: "active-id", updatedAt: "2026-09-17T12:00:00Z" };
+  const ended = { ...conversation("JOB_INTERVIEW"), id: "ended-id", endedAt: "2026-09-16T12:00:00Z" };
+  const ui = await app({ handle: req => req.path === "/api/v1/conversations" ? { body: [active, ended] }
+    : req.path === "/api/v1/conversations/active-id" ? { body: { ...detail("FREE_TALK"), conversation: active } }
+    : req.path === "/api/v1/conversations/ended-id" ? { body: { ...detail("JOB_INTERVIEW"), conversation: ended, evaluation: conversationEvaluation() } } : null });
+  await ui.run('showView("conversations")');
+  const cards = ui.get("conversation-list").children;
+  assert.equal(cards.length, 2);
+  assert.match(cards[0].className, /conversation-active/);
+  assert.equal(cards[0].children.find(el => el.className === "conversation-state").textContent, "● Ativa");
+  assert.ok(cards[0].children.at(-1).children.some(button => button.textContent === "Excluir"));
+  assert.match(cards[1].className, /conversation-ended/);
+  assert.equal(cards[1].children.find(el => el.className === "conversation-state").textContent, "✓ Encerrada");
+  assert.equal(cards[1].children.at(-1).children.some(button => button.textContent === "Excluir"), false);
+  await cards[1].children.at(-1).children[0].click();
+  assert.equal(ui.get("delete-conversation").hidden, true);
+});
+
+test("Conversation created from new conversation keeps new conversation active", async () => {
+  const ui = await app({ authenticated: true, handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
+  await ui.run('appState.currentUser = { id: "owner" };');
+  await ui.run('appState.conversationNavigationContext = "new"; showView("scenarios");');
+  await ui.run(`openConversation("${id}", undefined, { navigationContext: "new" })`);
+  assert.equal(ui.state().currentView, "chat");
+  assert.equal(ui.nav.find(button => button.dataset.view === "scenarios").classList.contains("active"), true);
 });
 
 test("Sending without a loaded conversation redirects, never using legacy chat", async () => {
@@ -639,11 +1142,40 @@ test("Sending without a loaded conversation redirects, never using legacy chat",
   assert.equal(source.includes('"/api/v1/chat/stream"'), false);
 });
 
-test("New conversation button leaves persisted chat and navigates to scenario choice", async () => {
+test("Active conversation offers Excluir conversa and not Limpar", async () => {
   const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
-  await ui.run(`openConversation("${id}")`); await ui.get("clear-chat").click();
-  assert.equal(ui.state().currentView, "scenarios"); assert.equal(ui.state().currentConversation, null);
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("delete-conversation").hidden, false);
+  assert.equal(html.includes('id="clear-chat"'), false);
+  assert.match(html, /id="delete-conversation"[^>]*>[\s\S]*<span>Excluir conversa<\/span>/);
+});
+
+test("Canceling conversation deletion does not call DELETE", async () => {
+  const ui = await app({ handle: req => req.method === "GET" && req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
+  await ui.run(`openConversation("${id}")`); await ui.run(`window.confirm = () => false; deleteConversation("${id}", { navigateToNew: true })`);
   assert.equal(ui.calls.some(req => req.method === "DELETE"), false);
+  assert.equal(ui.state().currentConversation.id, id);
+});
+
+test("Confirming conversation deletion uses the existing endpoint and opens New conversation", async () => {
+  const ui = await app({ handle: req => req.method === "GET" && req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") }
+    : req.method === "DELETE" && req.path === `/api/v1/conversations/${id}` ? { status: 200 } : null });
+  await ui.run(`openConversation("${id}")`); await ui.run(`deleteConversation("${id}", { navigateToNew: true })`);
+  assert.equal(ui.calls.filter(req => req.method === "DELETE").length, 1);
+  assert.equal(ui.calls.find(req => req.method === "DELETE").path, `/api/v1/conversations/${id}`);
+  assert.equal(ui.state().currentConversation, null);
+  assert.equal(ui.state().currentView, "scenarios");
+  assert.equal(ui.state().conversationNavigationContext, "new");
+});
+
+test("Failed conversation deletion keeps the conversation and messages", async () => {
+  const ui = await app({ handle: req => req.method === "GET" && req.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") }
+    : req.method === "DELETE" && req.path === `/api/v1/conversations/${id}` ? { status: 500 } : null });
+  await ui.run(`openConversation("${id}")`); await ui.run(`deleteConversation("${id}", { navigateToNew: true, statusId: "conversation-completion-status" })`);
+  assert.equal(ui.state().currentConversation.id, id);
+  assert.equal(ui.state().currentView, "chat");
+  assert.equal(ui.get("chat-messages").children.length, 2);
+  assert.equal(ui.get("conversation-completion-status").textContent, "Não foi possível concluir a operação.");
 });
 
 
@@ -667,12 +1199,13 @@ test("Repeated start clicks while generating cannot issue a second creation", as
   assert.equal(ui.state().currentView, "chat");
 });
 
-test("Profile and Account remain available through the sidebar", async () => {
+test("Profile includes account information and the sidebar has no separate Account page", async () => {
   const ui = await app();
   await ui.click("Perfil");
   assert.equal(ui.state().currentView, "profile");
-  await ui.click("Conta");
-  assert.equal(ui.state().currentView, "account");
+  assert.equal(html.includes('data-view="account"'), false);
+  assert.ok(ui.get("account-logout"));
+  assert.ok(ui.get("account-email"));
 });
 
 test("Collapsed sidebar still opens Profile", async () => {
@@ -772,9 +1305,9 @@ test("Header identity and chat structure retain the independent controls and req
 
 test("Exactly one main view is visible after navigation, and hidden Chat never leaks into another page", async () => {
   const ui = await app();
-  const visibleViews = () => [...["home", "profile", "account", "scenarios", "conversations", "translate", "correct", "chat"]]
+  const visibleViews = () => [...["home", "profile", "progress", "vocabulary", "reading", "scenarios", "conversations", "translate", "correct", "chat"]]
     .filter(name => !ui.get(`view-${name}`).hidden);
-  for (const view of ["home", "profile", "account", "scenarios", "conversations", "translate", "correct"]) {
+  for (const view of ["home", "profile", "progress", "vocabulary", "reading", "scenarios", "conversations", "translate", "correct"]) {
     await ui.run(`showView("${view}")`);
     assert.deepEqual(visibleViews(), [view]);
     assert.equal(ui.get("view-chat").hidden, true);
@@ -787,7 +1320,7 @@ test("Exactly one main view is visible after navigation, and hidden Chat never l
 test("A validated conversation makes Chat the sole visible view with its resolved assistant and history", async () => {
   const ui = await app({ handle: request => request.path === `/api/v1/conversations/${id}` ? { body: detail("JOB_INTERVIEW") } : null });
   await ui.run(`openConversation("${id}")`);
-  const visible = ["home", "profile", "account", "scenarios", "conversations", "translate", "correct", "chat"]
+  const visible = ["home", "profile", "progress", "vocabulary", "reading", "scenarios", "conversations", "translate", "correct", "chat"]
     .filter(name => !ui.get(`view-${name}`).hidden);
   assert.deepEqual(visible, ["chat"]);
   assert.equal(ui.get("chat-assistant-name").textContent, "Rodrigo");
@@ -832,6 +1365,12 @@ test("Translation and correction render structured learning content without empt
   assert.equal(ui.get("correction-learning").hidden, true);
   assert.match(ui.get("correction-state").textContent, /correta/);
 });
+test("Translate renders only response.translation in the main field", async () => {
+  const ui = await app({ handle: req => req.path === "/api/v1/translate" ? { body: { translation: "Texto traduzido", inputLanguage: "en", enrichment: null } } : null });
+  await ui.run('$("translation-text").value = "Hello"; $("source-language").value = "en"; $("target-language").value = "pt"; translate()');
+  assert.equal(ui.get("translation-result").value, "Texto traduzido");
+  assert.equal(ui.get("translation-result").value.includes("translation"), false);
+});
 
 test("Standalone correction uses one response and no longer exposes the second explanation flow", async () => {
   assert.equal(html.includes("explain-correction"), false);
@@ -857,7 +1396,7 @@ for (const count of [0, 2, 3, 4]) {
     assert.equal(buttons.length, 3);
     assert.ok(buttons.every(button => button.disabled === (count >= 3)));
     if (count >= 3) {
-      assert.equal(ui.get("scenario-status").textContent, "Você atingiu o limite de 3 conversas. Exclua uma conversa para iniciar outra.");
+      assert.equal(ui.get("scenario-status").textContent, "Você já possui 3 conversas ativas. Encerre ou exclua uma delas para iniciar outra.");
       await ui.run('createConversation("FREE_TALK")');
       assert.equal(ui.calls.filter(req => req.method === "POST").length, 0);
     }
@@ -907,7 +1446,7 @@ test("Deleting a conversation frees creation without login and a server conflict
   await button.click();
   assert.equal(ui.state().currentView, "scenarios");
   assert.ok(ui.get("scenario-list").children.every(card => card.children.at(-1).disabled));
-  assert.match(ui.get("scenario-status").textContent, /limite de 3 conversas/);
+  assert.match(ui.get("scenario-status").textContent, /3 conversas ativas/);
 });
 
 test("Assistant speech captures its conversation id while text tools stay generic", async () => {

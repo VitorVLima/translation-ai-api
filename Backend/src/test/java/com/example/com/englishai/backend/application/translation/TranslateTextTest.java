@@ -95,6 +95,52 @@ class TranslateTextTest {
         assertThat(result.translation()).isEqualTo("plain translation");
         assertThat(result.enrichment()).isNull();
     }
+    @Test void longStructuredResponseUsesOnlyTranslationAndDropsEnrichment() {
+        LlmProvider provider = mock(LlmProvider.class);
+        when(provider.complete(any())).thenReturn(new LlmResponse("{\"translation\":\"Long translated text.\",\"inputLanguage\":\"en\",\"enrichment\":{\"usage\":\"must be ignored\"}}"));
+        var result = new TranslateText(provider, 5000).execute(new TranslateTextCommand(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty-one twenty-two",
+                Language.ENGLISH, Language.PORTUGUESE));
+        assertThat(result.translation()).isEqualTo("Long translated text.");
+        assertThat(result.enrichment()).isNull();
+        verify(provider).complete(argThat(r -> r.responseFormat() == LlmResponseFormat.TEXT));
+    }
+    @Test void longStructuredResponseInsideCodeFenceIsNormalized() {
+        LlmProvider provider = mock(LlmProvider.class);
+        when(provider.complete(any())).thenReturn(new LlmResponse("```json\n{\"translation\":\"Long translated text.\",\"enrichment\":null}\n```"));
+        var result = new TranslateText(provider, 5000).execute(new TranslateTextCommand(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty-one twenty-two",
+                Language.ENGLISH, Language.PORTUGUESE));
+        assertThat(result.translation()).isEqualTo("Long translated text.");
+        assertThat(result.enrichment()).isNull();
+    }
+    @Test void oneLevelStringifiedStructuredResponseIsNormalized() {
+        LlmProvider provider = mock(LlmProvider.class);
+        when(provider.complete(any())).thenReturn(new LlmResponse("\"{\\\"translation\\\":\\\"Long translated text.\\\",\\\"enrichment\\\":null}\""));
+        var result = new TranslateText(provider, 5000).execute(new TranslateTextCommand(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty-one twenty-two",
+                Language.ENGLISH, Language.PORTUGUESE));
+        assertThat(result.translation()).isEqualTo("Long translated text.");
+        assertThat(result.enrichment()).isNull();
+    }
+    @Test void nestedStructuredTranslationIsNormalizedWithoutUnboundedParsing() {
+        LlmProvider provider = mock(LlmProvider.class);
+        when(provider.complete(any())).thenReturn(new LlmResponse("{\"translation\":\"{\\\"translation\\\":\\\"Olá\\\",\\\"inputLanguage\\\":\\\"en\\\",\\\"enrichment\\\":null}\"}"));
+        var result = new TranslateText(provider, 5000).execute(new TranslateTextCommand(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty-one twenty-two",
+                Language.ENGLISH, Language.PORTUGUESE));
+        assertThat(result.translation()).isEqualTo("Olá");
+        assertThat(result.enrichment()).isNull();
+    }
+    @Test void longNonJsonResponseRemainsPlainTranslationFallback() {
+        LlmProvider provider = mock(LlmProvider.class);
+        when(provider.complete(any())).thenReturn(new LlmResponse("plain long translation"));
+        var result = new TranslateText(provider, 5000).execute(new TranslateTextCommand(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty-one twenty-two",
+                Language.ENGLISH, Language.PORTUGUESE));
+        assertThat(result.translation()).isEqualTo("plain long translation");
+        assertThat(result.enrichment()).isNull();
+    }
     @Test void rejectsInvalidCommandsAndLength() {
         assertThatThrownBy(() -> new TranslateTextCommand("x", Language.ENGLISH, Language.ENGLISH)).isInstanceOf(InvalidTranslationRequestException.class);
         assertThatThrownBy(() -> new TranslateTextCommand(" ", Language.ENGLISH, Language.PORTUGUESE)).isInstanceOf(InvalidTranslationRequestException.class);

@@ -39,7 +39,7 @@ public class TranslateText {
         var response = provider.complete(new LlmRequest(system, user, null, shortText ? LlmResponseFormat.JSON : LlmResponseFormat.TEXT));
         if (response == null || response.content() == null || response.content().isBlank())
             throw new LlmProviderException("LLM provider returned an empty response");
-        return shortText ? parseShortResponse(response.content().trim(), command.text(), command.targetLanguage()) : new TranslateTextResult(response.content().trim());
+        return shortText ? parseShortResponse(response.content().trim(), command.text(), command.targetLanguage()) : parseLongResponse(response.content().trim());
     }
 
     static int wordCount(String text) { return text.trim().isEmpty() ? 0 : text.trim().split("\\s+").length; }
@@ -52,6 +52,7 @@ public class TranslateText {
                 log.warn("TRANSLATION_ENRICHMENT_PARSE status=missing_translation json_type={}", root.getNodeType());
                 return new TranslateTextResult(raw);
             }
+            translation = normalizeNestedTranslation(translation);
             String detectedCode = root.path("inputLanguage").asText(null);
             if (detectedCode != null && !detectedCode.isBlank()) {
                 try {
@@ -86,6 +87,29 @@ public class TranslateText {
         } catch (Exception exception) {
             log.warn("TRANSLATION_ENRICHMENT_PARSE status=invalid_json reason={}", exception.getClass().getSimpleName());
             return new TranslateTextResult(raw);
+        }
+    }
+
+    private static TranslateTextResult parseLongResponse(String raw) {
+        try {
+            JsonNode root = readJson(raw);
+            if (root.isTextual()) root = readJson(root.asText());
+            String translation = root.path("translation").asText(null);
+            return translation == null || translation.isBlank() ? new TranslateTextResult(raw) : new TranslateTextResult(normalizeNestedTranslation(translation));
+        } catch (Exception exception) {
+            return new TranslateTextResult(raw);
+        }
+    }
+
+    private static String normalizeNestedTranslation(String translation) {
+        String value = translation.trim();
+        if (!value.startsWith("{")) return translation;
+        try {
+            JsonNode nested = readJson(value);
+            String normalized = nested.path("translation").asText(null);
+            return normalized == null || normalized.isBlank() ? translation : normalized;
+        } catch (Exception ignored) {
+            return translation;
         }
     }
 

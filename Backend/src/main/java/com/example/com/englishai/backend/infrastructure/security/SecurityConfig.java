@@ -42,12 +42,13 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             AuthenticationTokenValidator tokenValidator,
+            @Value("${security.jwt.diagnostics-enabled:false}") boolean jwtDiagnosticsEnabled,
             ObjectProvider<AuthenticationRateLimitFilter> rateLimitFilter,
             ObjectProvider<UserJpaRepository> users
     ) throws Exception {
 
         var entryPoint = new UnauthorizedEntryPoint();
-        var jwtFilter = new JwtAuthenticationFilter(tokenValidator, entryPoint);
+        var jwtFilter = new JwtAuthenticationFilter(tokenValidator, entryPoint, jwtDiagnosticsEnabled);
 
         http
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

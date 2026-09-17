@@ -77,6 +77,7 @@ security:
     secret: ${JWT_SECRET}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
     clock-skew-seconds: ${SECURITY_JWT_CLOCK_SKEW_SECONDS:60}
+    diagnostics-enabled: ${JWT_DIAGNOSTICS_ENABLED:false}
     issuer: ${SECURITY_JWT_ISSUER:englishai}
     audience: ${SECURITY_JWT_AUDIENCE:englishai-api}
 

@@ -12,6 +12,7 @@ import com.example.com.englishai.backend.infrastructure.persistence.entity.UserV
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserProfileJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyLessonJpaRepository;
+import com.example.com.englishai.backend.infrastructure.persistence.repository.VocabularyItemJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserVocabularyWordJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -40,6 +40,8 @@ public class VocabularyService {
     public static final int QUIZ_QUESTION_COUNT = 5;
     public static final int MAX_SENTENCE_LENGTH = 1000;
     private static final int RECENT_WORD_LIMIT = 20;
+    private static final int MAX_REVIEWS_PER_LESSON = 3;
+    private static final int MAX_NEW_WORD_GENERATION_ATTEMPTS = 3;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Logger LOG = Logger.getLogger(VocabularyService.class.getName());
 
@@ -47,16 +49,21 @@ public class VocabularyService {
     private final UserProfileJpaRepository profiles;
     private final VocabularyLessonJpaRepository lessons;
     private final UserVocabularyWordJpaRepository vocabularyWords;
+    private final VocabularyItemJpaRepository items;
     private final UserJpaRepository users;
+    private final VocabularyReviewScheduler reviewScheduler;
 
     public VocabularyService(LlmProvider provider, UserProfileJpaRepository profiles,
                              VocabularyLessonJpaRepository lessons, UserVocabularyWordJpaRepository vocabularyWords,
-                             UserJpaRepository users) {
+                             VocabularyItemJpaRepository items, UserJpaRepository users,
+                             VocabularyReviewScheduler reviewScheduler) {
         this.provider = Objects.requireNonNull(provider);
         this.profiles = Objects.requireNonNull(profiles);
         this.lessons = Objects.requireNonNull(lessons);
         this.vocabularyWords = Objects.requireNonNull(vocabularyWords);
+        this.items = Objects.requireNonNull(items);
         this.users = Objects.requireNonNull(users);
+        this.reviewScheduler = Objects.requireNonNull(reviewScheduler);
     }
 
     public enum ProgressStatus { NEW, LEARNING, REVIEWING, MASTERED }
@@ -68,7 +75,8 @@ public class VocabularyService {
     }
 
     public record Word(UUID id, String word, String translation, String example, String exampleTranslation,
-                       VocabularyCategory category, ProgressStatus status, int correctCount, int incorrectCount) {}
+                       VocabularyCategory category, ProgressStatus status, int correctCount, int incorrectCount,
+                       boolean review) {}
 
     public record LessonProgress(boolean quizCompleted, Integer quizScore, boolean writingCompleted,
                                  OffsetDateTime completedAt) {}
@@ -87,7 +95,7 @@ public class VocabularyService {
     public Lesson today(UUID userId) {
         users.findByIdForUpdate(userId)
                 .orElseThrow(() -> new NoSuchElementException("User not found"));
-        LocalDate date = LocalDate.now(ZoneOffset.UTC);
+        LocalDate date = reviewScheduler.today();
         var existing = lessons.findByUserIdAndLessonDate(userId, date);
         if (existing.isPresent()) {
             var lesson = lessons.findForUpdateByIdAndUserId(existing.get().getId(), userId)
@@ -107,18 +115,25 @@ public class VocabularyService {
                 .map(UserProfileEntity::getEnglishLevel).orElse(null)).orElse(EnglishLevel.B1);
         VocabularyCategory category = VocabularyCategory.values()[Math.floorMod(
                 Objects.hash(userId, date), VocabularyCategory.values().length)];
+        OffsetDateTime now = reviewScheduler.now();
+        var reviews = dueReviewSources(userId, category, now);
         var recent = lessons.findRecentWords(userId, PageRequest.of(0, RECENT_WORD_LIMIT));
-        JsonNode root = parse(complete(prompt(level, VOCABULARY_ITEMS_PER_LESSON), "Generate a lesson for category " + category.name()
-                + " and level " + level.name()
-                + ". Avoid these recently studied words unless needed for meaningful review: " + recent));
-        var generated = parseWords(root, VOCABULARY_ITEMS_PER_LESSON, Set.of());
+        var reviewWords = reviews.stream().map(item -> normalizeWord(item.getWord())).filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        var generated = generateNewWords(userId, level, category, VOCABULARY_ITEMS_PER_LESSON - reviews.size(),
+                recent, reviewWords);
         var lesson = new VocabularyLessonEntity(UUID.randomUUID(), userId, date, level, category,
-                OffsetDateTime.now(ZoneOffset.UTC));
+                now);
         OffsetDateTime seenAt = lesson.getCreatedAt();
-        for (int i = 0; i < generated.size(); i++) {
-            var word = generated.get(i);
+        int position = 1;
+        for (var source : reviews) {
+            lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, position++, source.getWord(),
+                    source.getTranslation(), source.getExample(), source.getExampleTranslation(), category,
+                    source.getVocabularyWord(), true));
+        }
+        for (var word : generated) {
             var vocabularyWord = findOrCreateWord(userId, word.word(), seenAt);
-            lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, i + 1, word.word(),
+            lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, position++, word.word(),
                     word.translation(), word.example(), word.exampleTranslation(), category, vocabularyWord));
         }
         return toLesson(lessons.saveAndFlush(lesson));
@@ -135,10 +150,10 @@ public class VocabularyService {
                         + " additional entries. Existing lesson words to preserve and never repeat: "
                         + existingWords + ". Avoid these recently studied words unless needed for meaningful review: " + recent));
         var generated = parseWords(root, missing, existingWords.stream()
-                .filter(Objects::nonNull).map(value -> value.strip().toLowerCase(Locale.ROOT))
+                .map(VocabularyService::normalizeWord).filter(Objects::nonNull)
                 .collect(java.util.stream.Collectors.toSet()));
         int nextPosition = lesson.getItems().stream().mapToInt(VocabularyItemEntity::getPosition).max().orElse(0) + 1;
-        OffsetDateTime seenAt = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime seenAt = reviewScheduler.now();
         for (var word : generated) {
             var vocabularyWord = findOrCreateWord(userId, word.word(), seenAt);
             lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, nextPosition++, word.word(),
@@ -174,13 +189,14 @@ public class VocabularyService {
                 throw new IllegalArgumentException("Invalid vocabulary quiz answers");
             }
             boolean correct = answer.wordId().equals(answer.selectedWordId());
-            lessonItems.get(answer.wordId()).record(correct, OffsetDateTime.now(ZoneOffset.UTC));
+            var item = lessonItems.get(answer.wordId());
+            item.record(reviewScheduler.record(item.getStatus(), item.getVocabularyWord().getReviewStage(), correct));
             if (correct) score++;
         }
         if (!receivedQuestionIds.equals(expectedQuestionIds)) {
             throw new IllegalArgumentException("Invalid vocabulary quiz answers");
         }
-        lesson.completeQuiz(score, OffsetDateTime.now(ZoneOffset.UTC));
+        lesson.completeQuiz(score, reviewScheduler.now());
         return new QuizResult(score, QUIZ_QUESTION_COUNT, progress(lesson));
     }
 
@@ -205,8 +221,10 @@ public class VocabularyService {
                 || string(root, "explanation") == null || string(root, "explanation").isBlank()) {
             throw invalidResponse();
         }
-        item.record(status.equals("CORRECT"), OffsetDateTime.now(ZoneOffset.UTC));
-        lesson.completeWriting(OffsetDateTime.now(ZoneOffset.UTC));
+        // NEEDS_IMPROVEMENT remains conservative negative evidence, matching the prior counter behavior.
+        boolean correct = status.equals("CORRECT");
+        item.record(reviewScheduler.record(item.getStatus(), item.getVocabularyWord().getReviewStage(), correct));
+        lesson.completeWriting(reviewScheduler.now());
         return new Evaluation(status, string(root, "correctedSentence"), string(root, "explanation"),
                 string(root, "alternative"), progress(lesson));
     }
@@ -224,6 +242,43 @@ public class VocabularyService {
                 .orElseThrow(() -> new IllegalStateException("Vocabulary progress could not be loaded"));
         result.seenAt(now);
         return result;
+    }
+
+    private List<VocabularyItemEntity> dueReviewSources(UUID userId, VocabularyCategory category, OffsetDateTime now) {
+        var dueWords = vocabularyWords.findDueForReview(userId, category, now, PageRequest.of(0, MAX_REVIEWS_PER_LESSON));
+        if (dueWords.isEmpty()) return List.of();
+        var sources = items.findRecentSourcesByVocabularyWordIds(userId, category,
+                dueWords.stream().map(UserVocabularyWordEntity::getId).toList());
+        Map<UUID, VocabularyItemEntity> sourceByWord = new HashMap<>();
+        sources.forEach(source -> sourceByWord.putIfAbsent(source.getVocabularyWord().getId(), source));
+        return dueWords.stream().limit(MAX_REVIEWS_PER_LESSON).map(word -> sourceByWord.get(word.getId()))
+                .filter(Objects::nonNull).toList();
+    }
+
+    private List<Generated> generateNewWords(UUID userId, EnglishLevel level, VocabularyCategory category, int expectedCount,
+                                             List<String> recent, Set<String> excludedWords) {
+        if (expectedCount == 0) return List.of();
+        var accepted = new ArrayList<Generated>();
+        var excluded = new HashSet<>(excludedWords);
+        for (int attempt = 0; attempt < MAX_NEW_WORD_GENERATION_ATTEMPTS && accepted.size() < expectedCount; attempt++) {
+            int remaining = expectedCount - accepted.size();
+            JsonNode root = parse(complete(prompt(level, remaining), "Generate exactly " + remaining
+                    + " new entries for category " + category.name() + " and level " + level.name()
+                    + ". Avoid these recently studied words: " + recent
+                    + ". Never use these words because they are already selected or known: " + excluded));
+            // Parse and validate the provider payload first. Known words are
+            // filtered below so a collision can be retried without treating
+            // an otherwise valid response as malformed.
+            var candidates = parseWords(root, remaining, Set.of());
+            var normalized = candidates.stream().map(value -> normalizeWord(value.word())).toList();
+            var known = new HashSet<>(vocabularyWords.findExistingNormalizedWords(userId, normalized));
+            for (var candidate : candidates) {
+                String key = normalizeWord(candidate.word());
+                if (excluded.add(key) && !known.contains(key)) accepted.add(candidate);
+            }
+        }
+        if (accepted.size() != expectedCount) throw invalidResponse();
+        return accepted;
     }
 
     private String prompt(EnglishLevel level, int itemCount) {
@@ -255,8 +310,8 @@ public class VocabularyService {
             String exampleTranslation = clean(string(item, "exampleTranslation"));
             if (word == null || word.length() > 120 || translation == null || translation.length() > 200
                     || example == null || example.length() > 500 || exampleTranslation == null
-                    || exampleTranslation.length() > 600 || !seen.add(word.toLowerCase(Locale.ROOT))
-                    || existingWords.contains(word.toLowerCase(Locale.ROOT))) {
+                    || exampleTranslation.length() > 600 || !seen.add(normalizeWord(word))
+                    || existingWords.contains(normalizeWord(word))) {
                 throw invalidResponse();
             }
             result.add(new Generated(word, translation, example, exampleTranslation));
@@ -272,7 +327,7 @@ public class VocabularyService {
         return new Lesson(entity.getId(), entity.getLessonDate(), entity.getEnglishLevel(), entity.getCategory(),
                 orderedItems(entity).stream().map(item -> new Word(item.getId(), item.getWord(), item.getTranslation(),
                         item.getExample(), item.getExampleTranslation(), item.getCategory(), item.getStatus(),
-                        item.getCorrectCount(), item.getIncorrectCount())).toList(), progress(entity));
+                        item.getCorrectCount(), item.getIncorrectCount(), item.isReviewItem())).toList(), progress(entity));
     }
 
     private LessonProgress progress(VocabularyLessonEntity entity) {

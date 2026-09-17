@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.infrastructure.persistence.entity;
 
 import com.example.com.englishai.backend.application.vocabulary.VocabularyService;
+import com.example.com.englishai.backend.application.vocabulary.VocabularyReviewScheduler;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -39,6 +40,8 @@ public class UserVocabularyWordEntity {
     private OffsetDateTime lastReviewedAt;
     @Column(name = "next_review_at")
     private OffsetDateTime nextReviewAt;
+    @Column(name = "review_stage", nullable = false)
+    private short reviewStage;
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
     @Column(name = "updated_at", nullable = false)
@@ -63,17 +66,17 @@ public class UserVocabularyWordEntity {
         updatedAt = now;
     }
 
-    public void record(boolean correct, OffsetDateTime now) {
-        if (correct) {
+    public void record(VocabularyReviewScheduler.ReviewDecision decision) {
+        if (decision.correct()) {
             correctCount++;
-            if (correctCount >= 2) status = VocabularyService.ProgressStatus.REVIEWING;
-            else status = VocabularyService.ProgressStatus.LEARNING;
         } else {
             incorrectCount++;
-            status = VocabularyService.ProgressStatus.LEARNING;
         }
-        lastReviewedAt = now;
-        updatedAt = now;
+        status = decision.status();
+        reviewStage = (short) decision.stage();
+        lastReviewedAt = decision.reviewedAt();
+        nextReviewAt = decision.nextReviewAt();
+        updatedAt = decision.reviewedAt();
     }
 
     public UUID getId() { return id; }
@@ -87,6 +90,7 @@ public class UserVocabularyWordEntity {
     public OffsetDateTime getLastSeenAt() { return lastSeenAt; }
     public OffsetDateTime getLastReviewedAt() { return lastReviewedAt; }
     public OffsetDateTime getNextReviewAt() { return nextReviewAt; }
+    public int getReviewStage() { return reviewStage; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

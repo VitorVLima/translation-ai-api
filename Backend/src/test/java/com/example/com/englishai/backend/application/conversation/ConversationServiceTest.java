@@ -29,6 +29,7 @@ class ConversationServiceTest {
             new ChatWithTutor(provider, 5000), new ProfileService(profileRepository), definitions, identities, transactions, users);
 
     @BeforeEach void setup() {
+        when(conversations.findForUpdateByIdAndUserId(any(), any())).thenAnswer(call -> conversations.findByIdAndUserId(call.getArgument(0), call.getArgument(1)));
         when(users.findByIdForUpdate(any())).thenReturn(Optional.of(mock(UserEntity.class)));
         when(identities.resolve(anyString())).thenAnswer(invocation -> new com.example.com.englishai.backend.application.catalog.AssistantIdentityResolver.AssistantIdentity(
                 "Rodrigo", invocation.getArgument(0), "/api/v1/avatars/" + invocation.getArgument(0) + "/image"));
@@ -190,6 +191,28 @@ class ConversationServiceTest {
         assertThat(provider.request).isNull();
         verify(conversations, never()).save(any());
         verify(messages, never()).save(any());
+    }
+
+    @Test void failedTurnReleasesBusyFlagAndNextTurnCanContinue() {
+        var conversation=new ConversationEntity(id,owner,"CUSTOM_INTERVIEW","en","Practice",now);
+        when(conversations.findByIdAndUserId(id,owner)).thenReturn(Optional.of(conversation));
+        provider.fail=true;
+        assertThatThrownBy(() -> service.stream(owner,id,"I would like to practice.",part -> {})).isInstanceOf(LlmProviderException.class);
+        assertThat(conversation.isResponseInProgress()).isFalse();
+        assertThat(conversation.getEndedAt()).isNull();
+        provider.fail=false;
+        service.chat(owner,id,"I would like to try again.");
+        assertThat(conversation.isResponseInProgress()).isFalse();
+    }
+
+    @Test void endedConversationRejectsBothModesAndDirectPersistence() {
+        var conversation=new ConversationEntity(id,owner,"CUSTOM_INTERVIEW","en","Practice",now);conversation.end(now);
+        when(conversations.findByIdAndUserId(id,owner)).thenReturn(Optional.of(conversation));
+        assertThatThrownBy(() -> service.chat(owner,id,"Hello")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.stream(owner,id,"Hello",part -> {})).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.addMessage(owner,id,"USER","Hello",null)).isInstanceOf(IllegalStateException.class);
+        assertThat(provider.request).isNull();
+        verifyNoInteractions(messages);
     }
 
     private static class RecordingProvider implements LlmProvider, LlmStreamingProvider {

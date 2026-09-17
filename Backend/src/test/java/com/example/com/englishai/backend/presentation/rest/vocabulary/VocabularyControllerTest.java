@@ -55,7 +55,7 @@ class VocabularyControllerTest {
     void returnsDailyLessonCompletionState() throws Exception {
         var words = List.of(new VocabularyService.Word(UUID.randomUUID(), "drawer", "gaveta",
                 "In the drawer.", "Na gaveta.", VocabularyCategory.HOUSE,
-                VocabularyService.ProgressStatus.NEW, 0, 0));
+                VocabularyService.ProgressStatus.NEW, 0, 0, false));
         var progress = new VocabularyService.LessonProgress(true, 4, true, OffsetDateTime.now());
         when(service.today(user)).thenReturn(new VocabularyService.Lesson(UUID.randomUUID(), LocalDate.now(),
                 EnglishLevel.B1, VocabularyCategory.HOUSE, words, progress));
