@@ -32,15 +32,15 @@ class ConversationEvaluationServiceTest {
     @BeforeEach void setup() {
         conversation = new ConversationEntity(id,owner,"RESTAURANT","en","Practice",OffsetDateTime.now(clock));
         when(conversations.findForUpdateByIdAndUserId(id,owner)).thenAnswer(i -> Optional.of(conversation));
-        when(messages.countLinguisticUserMessages(id)).thenReturn(4L);
+        when(messages.countLinguisticUserMessages(id)).thenReturn(5L);
         when(provider.complete(any())).thenReturn(new LlmResponse(json(80,70,75,79)));
     }
-    @ParameterizedTest @ValueSource(longs={0,1,2,3})
+    @ParameterizedTest @ValueSource(longs={0,1,2,3,4})
     void insufficientDoesNotCallProviderOrEnd(long count) {
         when(messages.countLinguisticUserMessages(id)).thenReturn(count);
         var result=service.complete(owner,id);
         assertThat(result.status()).isEqualTo(ConversationEvaluationService.Result.INSUFFICIENT);
-        assertThat(result.minimumUserMessages()).isEqualTo(4);
+        assertThat(result.minimumUserMessages()).isEqualTo(5);
         assertThat(result.currentUserMessages()).isEqualTo(count);
         assertThat(conversation.getEndedAt()).isNull();
         verifyNoInteractions(provider);
@@ -48,7 +48,7 @@ class ConversationEvaluationServiceTest {
     }
     @ParameterizedTest @CsvSource({"80,70,75,79,77,SUCCESS","59,60,60,60,64,SUCCESS","59,59,59,59,63,SUCCESS",
             "0,0,0,0,16,NEEDS_PRACTICE","100,100,100,100,96,SUCCESS","70,70,71,71,72,SUCCESS"})
-    void exactlyFourMessagesProducesBackendAverageAndPersistedResult(int a,int b,int c,int d,int overall,String status) {
+    void exactlyFiveMessagesProducesBackendAverageAndPersistedResult(int a,int b,int c,int d,int overall,String status) {
         when(provider.complete(any())).thenReturn(new LlmResponse(json(a,b,c,d)));
         var result=service.complete(owner,id);
         assertThat(result.scores().overall()).isEqualTo(overall);

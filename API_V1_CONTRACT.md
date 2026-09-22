@@ -14,8 +14,8 @@ Status: revisão de contrato; extensões aditivas de TTS e cenários descritas a
 
 **CONVERSA INICIADA ≠ CONVERSA CONCLUÍDA.** Navegar, ouvir áudio ou fechar a página não conclui a atividade.
 
-- `POST /api/v1/conversations/{id}/complete`: autenticado, sem corpo. Identidade vem do principal; conversa alheia/inexistente retorna 404. Exige pelo menos quatro mensagens `USER` contendo letras; mensagens vazias, apenas números/pontuação e mensagens da IA não contam. A verificação é determinística, anterior à LLM.
-- Participação insuficiente retorna 200: `{"conversationId":"uuid","status":"INSUFFICIENT","minimumUserMessages":4,"currentUserMessages":2}`. Não chama LLM, não persiste avaliação e mantém a conversa ativa.
+- `POST /api/v1/conversations/{id}/complete`: autenticado, sem corpo. Identidade vem do principal; conversa alheia/inexistente retorna 404. Exige pelo menos cinco mensagens `USER` contendo letras; mensagens vazias, apenas números/pontuação e mensagens da IA não contam. A verificação é determinística, anterior à LLM.
+- Participação insuficiente retorna 200: `{"conversationId":"uuid","status":"INSUFFICIENT","minimumUserMessages":5,"currentUserMessages":2}`. Não chama LLM, não persiste avaliação e mantém a conversa ativa.
 - Avaliação válida retorna `conversationId`, `status`, `scores` (`communication`, `grammar`, `vocabulary`, `fluency`, `overall`), `strengths`, `improvements` e `evaluatedAt`. Scores são inteiros 0..100; cada lista de feedback tem até três textos de até 500 caracteres, em português brasileiro. Exemplos linguísticos permanecem em inglês.
 - Backend calcula `overall = (communication + grammar + vocabulary + fluency + 2) / 4`, com divisão inteira (arredondamento de metade para cima). **SUCCESS_THRESHOLD = 60**: resultado >=60 é `SUCCESS`; abaixo é `NEEDS_PRACTICE`. Ambos encerram a conversa. **INSUFFICIENT ≠ NEEDS_PRACTICE**.
 - `GET /api/v1/conversations/{id}` preserva `conversation` e `messages`, adicionando `evaluation` (null antes da avaliação). O DTO de conversa, inclusive na listagem, adiciona `endedAt` nullable. Reabrir histórico não chama a LLM.

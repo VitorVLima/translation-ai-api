@@ -15,7 +15,7 @@ import java.util.*;
 
 @Service
 public class ConversationEvaluationService {
-    public static final int MIN_USER_MESSAGES = 4;
+    public static final int MIN_USER_MESSAGES = 5;
     public static final int SUCCESS_THRESHOLD = 60;
     public static final int OPENING_MESSAGES = 8;
     public static final int RECENT_MESSAGES = 32;

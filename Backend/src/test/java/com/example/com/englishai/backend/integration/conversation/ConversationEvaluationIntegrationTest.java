@@ -58,7 +58,7 @@ class ConversationEvaluationIntegrationTest {
     ConversationEvaluationService.Evaluation complete(UUID owner, UUID id) {return tx.execute(s -> service.complete(owner,id));}
 
     @Test void twoUsersReloadOwnershipHistoryAndEndedConversationAreIndependent() {
-        var a=user();var b=user();var ca=conversation(a,4);var cb=conversation(b,4);
+        var a=user();var b=user();var ca=conversation(a,5);var cb=conversation(b,5);
         assertThatThrownBy(() -> complete(b,ca.getId())).isInstanceOf(NoSuchElementException.class);
         assertThatThrownBy(() -> service.get(b,ca.getId())).isInstanceOf(NoSuchElementException.class);
         var result=complete(a,ca.getId());
@@ -68,14 +68,14 @@ class ConversationEvaluationIntegrationTest {
         assertThat(conversations.findById(ca.getId()).orElseThrow().getEndedAt()).isEqualTo(now);
         assertThat(conversations.findById(cb.getId()).orElseThrow().getEndedAt()).isNull();
         assertThat(evaluations.findByConversationId(cb.getId())).isEmpty();
-        assertThat(messages.findByConversationIdOrderByCreatedAtAsc(ca.getId())).hasSize(8);
+        assertThat(messages.findByConversationIdOrderByCreatedAtAsc(ca.getId())).hasSize(10);
         assertThatThrownBy(() -> chat.chat(a,ca.getId(),"Hello")).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> chat.stream(a,ca.getId(),"Hello",part -> {})).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> chat.addMessage(a,ca.getId(),"USER","Hello",null)).isInstanceOf(IllegalStateException.class);
         verify(provider,times(1)).complete(any());
     }
     @Test void simultaneousCompletionCallsProviderOnceAndUniqueConstraintProtectsResult() throws Exception {
-        var owner=user();var c=conversation(owner,4);
+        var owner=user();var c=conversation(owner,5);
         var start=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(2)) {
             Callable<ConversationEvaluationService.Evaluation> call=() -> {start.await();return complete(owner,c.getId());};
@@ -89,27 +89,27 @@ class ConversationEvaluationIntegrationTest {
         assertThat(service.get(owner,c.getId()).scores().overall()).isEqualTo(77);
     }
     @Test void invalidProviderRollsBackAndRetryWorks() {
-        var owner=user();var c=conversation(owner,4);
+        var owner=user();var c=conversation(owner,5);
         when(provider.complete(any())).thenReturn(new LlmResponse("{}"));
         assertThatThrownBy(() -> complete(owner,c.getId())).isInstanceOf(LlmProviderException.class);
         assertThat(conversations.findById(c.getId()).orElseThrow().getEndedAt()).isNull();
         assertThat(evaluations.findByConversationId(c.getId())).isEmpty();
-        assertThat(messages.findByConversationIdOrderByCreatedAtAsc(c.getId())).hasSize(8);
+        assertThat(messages.findByConversationIdOrderByCreatedAtAsc(c.getId())).hasSize(10);
         when(provider.complete(any())).thenReturn(new LlmResponse("{\"communication\":30,\"grammar\":30,\"vocabulary\":30,\"fluency\":30,\"relevance\":30,\"strengths\":[],\"improvements\":[\"Continue praticando.\"]}"));
         assertThat(complete(owner,c.getId()).status()).isEqualTo(ConversationEvaluationService.Result.NEEDS_PRACTICE);
     }
     @Test void insufficientExcludesAssistantAndNonLinguisticMessagesAndKeepsActive() {
-        var owner=user();var c=conversation(owner,3);
+        var owner=user();var c=conversation(owner,4);
         for(var text:List.of("", "   ", "12345", "...")) messages.saveAndFlush(new ConversationMessageEntity(UUID.randomUUID(),c.getId(),"USER",text,null,now));
         var result=complete(owner,c.getId());
-        assertThat(result.currentUserMessages()).isEqualTo(3);
+        assertThat(result.currentUserMessages()).isEqualTo(4);
         assertThat(result.status()).isEqualTo(ConversationEvaluationService.Result.INSUFFICIENT);
         assertThat(conversations.findById(c.getId()).orElseThrow().getEndedAt()).isNull();
         assertThat(evaluations.findByConversationId(c.getId())).isEmpty();
         verifyNoInteractions(provider);
     }
     @Test void incompleteTurnCannotBeEvaluated() {
-        var owner=user();var c=conversation(owner,4);
+        var owner=user();var c=conversation(owner,5);
         tx.executeWithoutResult(s -> {var active=conversations.findForUpdateByIdAndUserId(c.getId(),owner).orElseThrow();active.beginResponse();});
         assertThatThrownBy(() -> complete(owner,c.getId())).isInstanceOf(IllegalStateException.class);
         assertThat(evaluations.findByConversationId(c.getId())).isEmpty();
@@ -117,7 +117,7 @@ class ConversationEvaluationIntegrationTest {
     }
 
     @Test void failureAfterEvaluationInsertRollsBackBothEvaluationAndEndState() {
-        var owner=user();var c=conversation(owner,4);
+        var owner=user();var c=conversation(owner,5);
         var failing=mock(ConversationJpaRepository.class,org.mockito.AdditionalAnswers.delegatesTo(conversations));
         doThrow(new IllegalStateException("Write failed")).when(failing).saveAndFlush(any());
         var isolated=new ConversationEvaluationService(failing,messages,evaluations,provider);

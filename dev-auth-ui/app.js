@@ -3,11 +3,18 @@ const BACKEND_URL = "http://localhost:8080";
 const GOOGLE_CLIENT_ID = "491728559092-frggmogjfh3mmh0kkduuk11053lucfp3.apps.googleusercontent.com";
 const ACCESS_KEY = "englishai_access_token", REFRESH_KEY = "englishai_refresh_token";
 
+const CONVERSATION_MIN_USER_MESSAGES = 5;
 let chatHistory = [];
 let scenarioCatalog = [], avatarCatalog = [];
 let conversationLoadVersion = 0, pendingConversationCreation = null;
+let conversationHistory = [], conversationHistoryFilter = "all", conversationHistoryQuery = "";
 let conversationCompletion = null;
 let progressRequest = null, progressVersion = 0, progressPeriod = "ALL_TIME";
+let pendingVerificationEmail = "", verificationCooldownEnd = 0, verificationTimer = null;
+let authNavigationVersion = 0;
+let onboardingDeferredForSession = false;
+let homeDashboardVersion = 0, homeVocabularyRequest = null, homeProgressRequest = null;
+let homeVocabularyLesson = null, homeVocabularyOwner = null;
 const appState = { currentUser: null, profile: null, avatars: avatarCatalog, currentConversation: null, conversationCount: null, currentView: null, conversationNavigationContext: null, sidebarCollapsed: globalThis.localStorage?.getItem("englishai_sidebar_collapsed") === "true" };
 const $ = id => document.getElementById(id);
 const LOADING_DELAY_MS = 200;
@@ -100,11 +107,44 @@ function resetProgress() {
   progressVersion++; progressRequest?.abort(); progressRequest = null; progressPeriod = "ALL_TIME";
   document.querySelectorAll?.(".progress-period").forEach(button => button.classList.toggle("active", button.dataset.period === progressPeriod));
   ["progress-conversations", "progress-readings", "progress-new-words", "progress-mastered", "progress-conversation-count", "progress-conversation-success", "progress-conversation-rate", "progress-conversation-average", "progress-communication", "progress-grammar", "progress-vocabulary", "progress-fluency", "progress-reading-count", "progress-reading-success", "progress-reading-rate", "progress-reading-average", "progress-word-count", "progress-word-new", "progress-word-learning", "progress-word-reviewing", "progress-word-mastered", "progress-word-due", "progress-vocabulary-period"].forEach(id => { const element = $(id); if (element) element.textContent = ""; });
-  ["progress-conversation-difficulty", "progress-reading-difficulty", "progress-timeline"].forEach(id => $(id)?.replaceChildren());
+  ["progress-conversation-difficulty", "progress-reading-difficulty", "progress-timeline", "progress-conversation-chart", "progress-reading-chart", "progress-vocabulary-chart", "progress-evolution-chart"].forEach(id => { const element = $(id); if (element) { element.replaceChildren(); element.innerHTML = ""; } });
   const content = $("progress-content"); if (content) content.hidden = true;
   setMessage("progress-status");
 }
-function showLogin(message = "", clear = true) { resetReading(); resetVocabulary(); resetProgress(); clearCurrentConversation(); appState.currentUser = null; appState.profile = null; appState.conversationCount = null; scenarioCatalog = []; if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; $("skip-link").setAttribute("href", "#login-form"); setMessage("message", message); }
+function stopVerificationTimer() { if (verificationTimer !== null) { clearInterval(verificationTimer); verificationTimer = null; } }
+function updateVerificationCooldown() {
+  const button = $("resend-verification"); if (!button) return;
+  const seconds = Math.max(0, Math.ceil((verificationCooldownEnd - Date.now()) / 1000));
+  button.disabled = seconds > 0;
+  button.textContent = seconds > 0 ? `Reenviar código em ${seconds}s` : "Reenviar código";
+  if (!seconds) stopVerificationTimer();
+}
+function startVerificationCooldown() {
+  stopVerificationTimer(); verificationCooldownEnd = Date.now() + 60_000; updateVerificationCooldown();
+  verificationTimer = setInterval(updateVerificationCooldown, 1000);
+}
+function resetVerificationState() {
+  stopVerificationTimer(); verificationCooldownEnd = 0; pendingVerificationEmail = "";
+  $("verification-code")?.setAttribute("value", ""); if ($("verification-code")) $("verification-code").value = "";
+  setMessage("verification-message");
+}
+function openVerification(email, { startCooldown = false } = {}) {
+  stopVerificationTimer(); verificationCooldownEnd = 0; pendingVerificationEmail = email;
+  $("verification-code").value = ""; $("verification-email").textContent = maskEmail(email);
+  showAuthMode("verification"); setMessage("verification-message");
+  if (startCooldown) startVerificationCooldown(); else updateVerificationCooldown();
+  $("verification-code").focus();
+}
+function showAuthMode(mode = "login") {
+  const loginCard = $("login-card"), registerCard = $("register-card"), verificationCard = $("verification-card");
+  if (!loginCard || !registerCard || !verificationCard) return;
+  const register = mode === "register", verification = mode === "verification";
+  loginCard.hidden = register || verification; registerCard.hidden = !register; verificationCard.hidden = !verification;
+  $("skip-link").setAttribute("href", verification ? "#verification-form" : register ? "#register-form" : "#login-form");
+  setMessage("message"); setMessage("register-message");
+  if (!verification) resetVerificationState();
+}
+function showLogin(message = "", clear = true) { resetReading(); resetVocabulary(); resetProgress(); resetHomeDashboard(); clearCurrentConversation(); appState.currentUser = null; appState.profile = null; appState.conversationCount = null; onboardingDeferredForSession = false; scenarioCatalog = []; if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; showAuthMode("login"); setMessage("message", message); }
 function validConversation(conversation) {
   return conversation && typeof conversation.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversation.id)
     && typeof conversation.scenario === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(conversation.scenario)
@@ -124,6 +164,7 @@ function clearCurrentConversation() {
   cancelConversation();
   appState.currentConversation = null;
   chatHistory = [];
+  updateConversationProgress();
   $("chat-messages").replaceChildren();
   $("chat-message").value = "";
   $("chat-form").hidden = false;
@@ -153,15 +194,42 @@ function showView(name) {
   if (name === "progress") loadProgress().catch(error => { console.error("[Progress] load failed", error); setMessage("progress-status", "Não foi possível carregar seu progresso."); });
   document.querySelectorAll(".page-view").forEach(v => v.hidden = v.id !== `view-${name}`);
   const activeView = name === "chat" ? appState.conversationNavigationContext === "history" ? "conversations" : "scenarios" : name;
+  const practiceViews = ["scenarios", "reading", "vocabulary", "translate", "correct"];
+  const primaryActiveView = practiceViews.includes(activeView) ? "practice" : activeView;
   document.querySelectorAll("[data-view]").forEach(b => {
-    b.classList.toggle("active", b.dataset.view === activeView);
-    b.setAttribute("aria-current", b.dataset.view === activeView ? "page" : "false");
+    const isPrimaryNav = b.classList.contains("primary-nav-item") || String(b.className || "").split(/\s+/).includes("primary-nav-item");
+    const target = isPrimaryNav ? primaryActiveView : activeView;
+    b.classList.toggle("active", b.dataset.view === target);
+    b.setAttribute("aria-current", b.dataset.view === target ? "page" : "false");
   });
   if (name === "scenarios" && appState.currentUser) return loadScenarios().catch(() => { loadingOperations.get("scenario-loading")?.finish(); setMessage("scenario-status", "Não foi possível carregar os cenários."); });
   if (name === "conversations" && appState.currentUser) return loadConversations().catch(() => setMessage("conversation-status", "Não foi possível carregar as conversas."));
 }
 
 function chatScrollBehavior() { return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth"; }
+function isLinguisticUserMessage(message) {
+  return message?.role === "user" && typeof message.content === "string" && /\p{L}/u.test(message.content);
+}
+function conversationProgressCount() {
+  return chatHistory.filter(isLinguisticUserMessage).length;
+}
+function conversationCanBeCompleted() {
+  return conversationProgressCount() >= CONVERSATION_MIN_USER_MESSAGES;
+}
+function updateConversationProgress() {
+  const progress = $("conversation-progress"), bar = $("conversation-progress-bar"), fill = $("conversation-progress-fill"),
+    text = $("conversation-progress-text"), complete = $("conversation-progress-complete"), closed = !!appState.currentConversation?.endedAt;
+  if (!progress || !bar || !fill || !text || !complete) return;
+  progress.hidden = closed || !appState.currentConversation;
+  if (progress.hidden) return;
+  const ready = conversationCanBeCompleted(), value = Math.min(conversationProgressCount() / CONVERSATION_MIN_USER_MESSAGES, 1), percent = Math.round(value * 100);
+  fill.setAttribute("style", `--conversation-progress:${percent}%`);
+  bar.setAttribute("aria-valuenow", String(percent));
+  bar.setAttribute("aria-valuetext", ready ? "Você já pode concluir esta conversa." : "Continue conversando para concluir esta atividade.");
+  text.textContent = ready ? "Você já pode concluir esta conversa." : "Continue conversando para concluir esta atividade.";
+  complete.hidden = !ready;
+  progress.classList.toggle("is-complete", ready);
+}
 function elapsed(start) { return `Concluído em ${((performance.now() - start) / 1000).toFixed(1)} s`; }
 async function loadCurrentUser() {
   const current = tokens();
@@ -176,13 +244,14 @@ async function loadCurrentUser() {
 }
 
 async function loginLocal(event) {
-  event.preventDefault(); setMessage("message"); const button = event.submitter; button.disabled = true; setButtonBusy(button, true);
-  try { const result = await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
-    if (!result.response.ok) { setMessage("message", result.response.status === 403 ? "Verifique seu email antes de entrar." : result.response.status === 401 ? "Email ou senha inválidos." : "Não foi possível entrar."); return; }
+  event.preventDefault(); setMessage("message"); const button = event.submitter, email = $("email").value.trim(); button.disabled = true; setButtonBusy(button, true);
+  try { const result = await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password: $("password").value }) });
+    if (result.response.status === 403) { $("password").value = ""; openVerification(email); return; }
+    if (!result.response.ok) { setMessage("message", result.response.status === 401 ? "Email ou senha inválidos." : "Não foi possível entrar."); return; }
     saveTokens(result.body); await showHome();
   } catch (_) { setMessage("message", "Não foi possível conectar ao servidor."); } finally { button.disabled = false; setButtonBusy(button, false); }
 }
-async function showHome() { const state=await loadCurrentUser(); if(state.kind!=="user"){if(state.kind==="none")showLogin();else if(state.kind==="expired")showLogin("Sua sessão expirou. Entre novamente.");else showLogin("Não foi possível conectar ao servidor.",false);return;} const user=state.user; clearCurrentConversation(); appState.conversationNavigationContext=null; if(appState.currentUser?.id!==user.id){resetVocabulary();resetProgress();} appState.currentUser=user; try{await loadGlobalProfile();}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");} loginView.hidden=true;appView.hidden=false;$("skip-link").setAttribute("href","#main-content");["username","header-username","account-name"].forEach(id=>{const el=$(id);if(el)el.textContent=user.username||"";});["account-email"].forEach(id=>{const el=$(id);if(el)el.textContent=user.email||"";});const verified=user.emailVerified===true?"Sim":user.emailVerified===false?"Não":"Não informado";const verifiedEl=$("account-verified");if(verifiedEl)verifiedEl.textContent=verified;showView("home");}
+async function showHome({ preserveManualAuthNavigation = false } = {}) { const navigationVersion = authNavigationVersion, state=await loadCurrentUser(); if(state.kind!=="user"){if(preserveManualAuthNavigation&&navigationVersion!==authNavigationVersion)return;if(state.kind==="none")showLogin();else if(state.kind==="expired")showLogin("Sua sessão expirou. Entre novamente.");else showLogin("Não foi possível conectar ao servidor.",false);return;} const user=state.user; clearCurrentConversation(); appState.conversationNavigationContext=null; if(appState.currentUser?.id!==user.id){resetVocabulary();resetProgress();resetHomeDashboard();onboardingDeferredForSession=false;} appState.currentUser=user; try{await loadGlobalProfile();}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");} loginView.hidden=true;appView.hidden=false;$("skip-link").setAttribute("href","#main-content");["username","header-username","account-name"].forEach(id=>{const el=$(id);if(el)el.textContent=user.username||"";});["account-email"].forEach(id=>{const el=$(id);if(el)el.textContent=user.email||"";});const verified=user.emailVerified===true?"Sim":user.emailVerified===false?"Não":"Não informado";const verifiedEl=$("account-verified");if(verifiedEl)verifiedEl.textContent=verified;showView("home");renderOnboardingOffer(appState.profile);loadHomeDashboard();}
 
 async function runAi({ buttonId, statusId, path, body, onSuccess, loading }) {
   const button = $(buttonId), start = performance.now(); button.disabled = true; setButtonBusy(button, true); button.textContent = loading; setMessage(statusId);
@@ -199,12 +268,24 @@ async function prepareGoogle() { if (!window.google?.accounts?.id || GOOGLE_CLIE
 async function logout() { clearCurrentConversation(); const refreshToken = tokens().refreshToken; try { if (refreshToken) await request("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }); } finally { showLogin(); } }
 
 document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => { if (button.dataset.view === "scenarios") appState.conversationNavigationContext = "new"; if (button.dataset.view === "conversations") appState.conversationNavigationContext = "history"; showView(button.dataset.view); }));
+["all", "active", "completed"].forEach(filter => $("conversation-filter-" + filter).addEventListener("click", () => { conversationHistoryFilter = filter; renderConversationHistory(); }));
+$("conversation-search").addEventListener("input", () => { conversationHistoryQuery = $("conversation-search").value; renderConversationHistory(); });
 $("sidebar-toggle")?.addEventListener("click", () => { appState.sidebarCollapsed = !appState.sidebarCollapsed; globalThis.localStorage?.setItem("englishai_sidebar_collapsed", String(appState.sidebarCollapsed)); applySidebarState(); });
 $("profile-header-link").addEventListener("click", () => { showView("profile"); loadProfileArea(); });
 applySidebarState();
-$("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout").addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
+$("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout")?.addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
+$("register-form").addEventListener("submit", registerLocal); $("show-register").addEventListener("click", () => { authNavigationVersion++; showAuthMode("register"); $("register-username").focus(); }); $("show-login").addEventListener("click", () => { authNavigationVersion++; showAuthMode("login"); $("email").focus(); });
+$("verification-form").addEventListener("submit", verifyEmail); $("resend-verification").addEventListener("click", resendVerification); $("verification-back-login").addEventListener("click", () => showAuthMode("login"));
 $("translation-text").addEventListener("input", () => $("translation-count").textContent = $("translation-text").value.length); $("record-chat").addEventListener("click", toggleRecording); $("record-translation").addEventListener("click", () => toggleRecording(toolRecordingConfig("translation"))); $("record-correction").addEventListener("click", () => toggleRecording(toolRecordingConfig("correction"))); $("speak-translation").addEventListener("click", () => playSpeech($("speak-translation"), $("translation-speech-status"), $("translation-result").value, $("target-language").value, false, undefined, false)); $("speak-correction").addEventListener("click", () => playSpeech($("speak-correction"), $("correction-speech-status"), $("corrected-result").value, "en", false, undefined, false)); $("correction-text").addEventListener("input", () => $("correction-count").textContent = $("correction-text").value.length); $("swap-languages").addEventListener("click", () => { const a = $("source-language"), b = $("target-language"), value = a.value; a.value = b.value; b.value = value; });
-function appendChatMessage(role,text,pending=false){document.querySelectorAll(".chat-welcome").forEach(el => el.remove());const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong");label.textContent=role==="user"?"Você":appState.currentConversation?.assistantDisplayName||"";const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.hidden=false;bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);if(role==="assistant"&&text.trim())item.speechAction=appendAssistantActions(item,text,appState.currentConversation?.language);$("chat-messages").append(item);$("chat-messages").scrollTo({top:$('chat-messages').scrollHeight,behavior:chatScrollBehavior()});return {item,bubble};}
+function chatMessageAvatar(role) {
+  if (role === "assistant") {
+    const conversation = appState.currentConversation;
+    return createAvatarElement({ imageUrl: conversation?.assistantAvatarImageUrl, alt: `Avatar de ${conversation?.assistantDisplayName || "assistente"}`, className: "chat-message-avatar assistant-avatar" });
+  }
+  const avatar = avatarCatalog.find(item => item.key === (currentProfile || appState.profile)?.avatarKey);
+  return avatar?.imageUrl ? createAvatarElement({ imageUrl: avatar.imageUrl, alt: "Seu avatar", className: "chat-message-avatar user-avatar" }) : null;
+}
+function appendChatMessage(role,text,pending=false){document.querySelectorAll(".chat-welcome").forEach(el => el.remove());const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong"),avatar=chatMessageAvatar(role),name=document.createElement("span");name.textContent=role==="user"?"Você":appState.currentConversation?.assistantDisplayName||"";if(avatar)label.append(avatar);label.append(name);const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.hidden=false;bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);if(role==="assistant"&&text.trim())item.speechAction=appendAssistantActions(item,text,appState.currentConversation?.language);$("chat-messages").append(item);$("chat-messages").scrollTo({top:$("chat-messages").scrollHeight,behavior:chatScrollBehavior()});return {item,bubble};}
 
 // Only the current request/player owns an audio URL; rendered history does not retain audio state.
 let currentSpeech = null;
@@ -218,9 +299,123 @@ function setSpeechState(button, state) {
   button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-busy", String(state === "loading"));
 }
+function registrationPasswordBytes(value) { return new TextEncoder().encode(value).length; }
+function registrationError(result) {
+  if (result.networkError) return "Não foi possível conectar ao servidor.";
+  if (result.response.status === 409) {
+    const message = result.body?.message;
+    if (message === "Email already exists") return "Este e-mail já está em uso.";
+    if (message === "Username already exists") return "Este nome de usuário já está em uso.";
+  }
+  if (result.response.status === 400) {
+    const errors = result.body?.errors || {};
+    if (errors.email) return "Informe um e-mail válido.";
+    if (errors.username) return "O nome de usuário deve ter entre 3 e 100 caracteres.";
+    if (errors.password) return "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.";
+  }
+  if (result.response.status === 429) return "Muitas solicitações. Tente novamente em instantes.";
+  return "Não foi possível criar sua conta.";
+}
+function maskEmail(email) {
+  const [local = "", domain = ""] = email.split("@");
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+async function registerLocal(event) {
+  event.preventDefault();
+  const button = $("register-submit"), username = $("register-username").value.trim(), emailInput = $("register-email"), email = emailInput.value.trim(), password = $("register-password").value, confirmation = $("register-password-confirm").value;
+  if (button.disabled) return;
+  setMessage("register-message");
+  if (!username || username.length < 3 || username.length > 100) return setMessage("register-message", "O nome de usuário deve ter entre 3 e 100 caracteres.");
+  if (!email || emailInput.validity?.valid === false) return setMessage("register-message", "Informe um e-mail válido.");
+  if (password.length < 6 || password.length > 100 || registrationPasswordBytes(password) > 72) return setMessage("register-message", "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.");
+  if (password !== confirmation) return setMessage("register-message", "As senhas não coincidem.");
+  button.disabled = true; setButtonBusy(button, true); button.textContent = "Criando conta...";
+  try {
+    const result = await request("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ email, username, password }) });
+    if (!result.response.ok) return setMessage("register-message", registrationError(result));
+    $("register-form").reset?.(); loginView.hidden = false; appView.hidden = true; openVerification(email, { startCooldown: true });
+  } catch (_) { setMessage("register-message", "Não foi possível conectar ao servidor."); }
+  finally { button.disabled = false; setButtonBusy(button, false); button.textContent = "Criar conta"; }
+}
+function verificationError(result) {
+  if (result.networkError) return "Não foi possível conectar ao servidor.";
+  if (result.response.status === 429) return "Muitas tentativas. Aguarde antes de tentar novamente.";
+  if (result.response.status === 400) return result.body?.errors?.code ? "Informe um código de 6 dígitos." : "Código incorreto ou expirado.";
+  return "Não foi possível confirmar o e-mail.";
+}
+async function verifyEmail(event) {
+  event.preventDefault(); const button = $("verification-submit"), code = $("verification-code").value.trim(); setMessage("verification-message");
+  if (!/^\d{6}$/.test(code)) return setMessage("verification-message", "Informe um código de 6 dígitos.");
+  if (button.disabled) return;
+  button.disabled = true; setButtonBusy(button, true); button.textContent = "Confirmando...";
+  try {
+    const result = await request("/api/v1/auth/verify-email", { method: "POST", body: JSON.stringify({ email: pendingVerificationEmail, code }) });
+    if (!result.response.ok) return setMessage("verification-message", verificationError(result));
+    $("verification-form").reset?.(); showAuthMode("login"); setMessage("message", "E-mail confirmado. Você já pode entrar.", true);
+  } catch (_) { setMessage("verification-message", "Não foi possível conectar ao servidor."); }
+  finally { button.disabled = false; setButtonBusy(button, false); button.textContent = "Confirmar e-mail"; }
+}
+async function resendVerification() {
+  const button = $("resend-verification"); if (button.disabled || !pendingVerificationEmail) return;
+  button.disabled = true; setMessage("verification-message");
+  try {
+    const result = await request("/api/v1/auth/resend-verification", { method: "POST", body: JSON.stringify({ email: pendingVerificationEmail }) });
+    if (!result.response.ok) { updateVerificationCooldown(); return setMessage("verification-message", result.response.status === 429 ? "Muitas tentativas. Aguarde antes de tentar novamente." : "Não foi possível reenviar o código."); }
+    startVerificationCooldown(); setMessage("verification-message", "Um novo código foi enviado.", true);
+  } catch (_) { updateVerificationCooldown(); setMessage("verification-message", "Não foi possível conectar ao servidor."); }
+}
 
 const progressDifficultyLabels = { BEGINNER: "Iniciante", INTERMEDIATE: "Intermediário", ADVANCED: "Avançado" };
 const progressValue = value => value == null ? "—" : `${Math.round(value)}%`;
+const progressNumber = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+const progressChartText = value => String(value ?? "").replace(/[&<>\"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character]));
+function progressChart(container, markup, label) {
+  container.replaceChildren(); container.innerHTML = markup; container.setAttribute("role", "img"); if (label) container.setAttribute("aria-label", label);
+}
+function progressEmptyChart(message) { return `<p class="progress-chart-empty">${progressChartText(message)}</p>`; }
+function progressLineSvg(points, label, series = [{ key: "average", color: "#5b50f5", name: "Desempenho" }], scaleMax = 100, unit = "%") {
+  const width = 640, height = 220, left = 38, right = 14, top = 22, bottom = 34, innerWidth = width - left - right, innerHeight = height - top - bottom;
+  const x = index => left + (points.length < 2 ? innerWidth / 2 : index * innerWidth / (points.length - 1));
+  const y = value => top + innerHeight - (value / scaleMax) * innerHeight;
+  const paths = series.map(seriesItem => {
+    let path = "", active = false;
+    points.forEach((point, index) => { const value = progressNumber(point?.[seriesItem.key]); if (value == null) { active = false; return; } const command = active ? "L" : "M"; path += `${command}${x(index).toFixed(1)} ${y(Math.max(0, Math.min(scaleMax, value))).toFixed(1)} `; active = true; });
+    return path ? `<path class="progress-chart-line" d="${path.trim()}" stroke="${seriesItem.color}" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : "";
+  }).join("");
+  const pointsMarkup = series.flatMap(seriesItem => points.map((point, index) => { const value = progressNumber(point?.[seriesItem.key]); return value == null ? "" : `<circle cx="${x(index).toFixed(1)}" cy="${y(Math.max(0, Math.min(scaleMax, value))).toFixed(1)}" r="4" fill="${seriesItem.color}"><title>${progressChartText(point?.period)}: ${Math.round(value)}</title></circle>`; })).join("");
+  const labels = points.map((point, index) => `<text x="${x(index).toFixed(1)}" y="${height - 8}" text-anchor="middle">${progressChartText(point?.period)}</text>`).join("");
+  const legend = series.length > 1 ? `<div class="progress-chart-legend">${series.map(item => `<span><i style="--legend-color:${item.color}" aria-hidden="true"></i>${progressChartText(item.name)}</span>`).join("")}</div>` : "";
+  return `<div class="progress-line-chart"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"><line x1="${left}" y1="${top + innerHeight}" x2="${width - right}" y2="${top + innerHeight}"/><line x1="${left}" y1="${top}" x2="${left}" y2="${top + innerHeight}"/><text x="${left - 8}" y="${top + 5}" text-anchor="end">${scaleMax}${unit}</text><text x="${left - 8}" y="${top + innerHeight + 4}" text-anchor="end">0${unit}</text>${paths}${pointsMarkup}${labels}</svg>${legend}<p class="sr-only">${progressChartText(label)}</p></div>`;
+}
+function renderProgressConversationChart(container, points) {
+  const valid = points.some(point => progressNumber(point?.conversation?.average) != null);
+  if (!valid) return progressChart(container, progressEmptyChart("Ainda não há conversas avaliadas suficientes para mostrar sua evolução."), "Desempenho nas conversas: sem dados suficientes");
+  const chartPoints = points.map(point => ({ period: point?.period, average: point?.conversation?.average }));
+  progressChart(container, progressLineSvg(chartPoints, "Desempenho das conversas ao longo do tempo", undefined, 100), "Desempenho das conversas ao longo do tempo");
+}
+function renderProgressReadingChart(container, rows) {
+  const entries = (Array.isArray(rows) ? rows : []).map(row => ({ label: progressDifficultyLabels[row?.difficulty] || row?.difficulty || "—", value: progressNumber(row?.averageComprehension), count: row?.count ?? 0 }));
+  if (!entries.some(entry => entry.count > 0 || entry.value != null)) return progressChart(container, progressEmptyChart("Ainda não há leituras concluídas para comparar as dificuldades."), "Compreensão por dificuldade: sem dados");
+  const bars = entries.map(entry => `<div class="progress-bar-item"><div class="progress-bar-track"><span style="height:${Math.max(0, Math.min(100, entry.value ?? 0))}%"></span></div><strong>${entry.value == null ? "—" : `${Math.round(entry.value)}%`}</strong><small>${progressChartText(entry.label)}</small></div>`).join("");
+  const label = `Compreensão por dificuldade: ${entries.map(entry => `${entry.label} ${entry.value == null ? "sem dados" : `${Math.round(entry.value)}%`}`).join(", ")}`;
+  progressChart(container, `<div class="progress-bar-chart" aria-label="${progressChartText(label)}">${bars}</div>`, label);
+}
+function renderProgressVocabularyChart(container, vocabulary) {
+  const entries = [{ label: "Novas", value: vocabulary?.newCount, color: "#5b50f5" }, { label: "Aprendendo", value: vocabulary?.learningCount, color: "#77a5f8" }, { label: "Em revisão", value: vocabulary?.reviewingCount, color: "#55b4d4" }, { label: "Dominadas", value: vocabulary?.masteredCount, color: "#41ae83" }].map(entry => ({ ...entry, value: Math.max(0, Number(entry.value) || 0) }));
+  const total = entries.reduce((sum, entry) => sum + entry.value, 0);
+  if (!total) return progressChart(container, progressEmptyChart("Ainda não há palavras suficientes para mostrar sua distribuição."), "Estado do vocabulário: sem palavras");
+  let start = 0; const stops = entries.map(entry => { const end = start + entry.value / total * 100; const stop = `${entry.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`; start = end; return stop; }).join(", ");
+  const legend = entries.map(entry => `<li><i style="--legend-color:${entry.color}" aria-hidden="true"></i><span>${entry.label}</span><strong>${entry.value} (${Math.round(entry.value / total * 100)}%)</strong></li>`).join("");
+  const label = `Estado do vocabulário: ${entries.map(entry => `${entry.label} ${entry.value}`).join(", ")}`;
+  progressChart(container, `<div class="progress-donut-chart"><div class="progress-donut" style="--progress-donut:conic-gradient(${stops})"><strong>${vocabulary?.totalWords ?? total}</strong><span>palavras</span></div><ul>${legend}</ul></div>`, label);
+}
+function renderProgressEvolutionChart(container, points) {
+  const series = [{ key: "conversationCount", color: "#5b50f5", name: "Conversas" }, { key: "readingCount", color: "#36a3e8", name: "Leituras" }, { key: "wordsFirstSeen", color: "#41ae83", name: "Novas palavras" }];
+  const chartPoints = points.map(point => ({ period: point?.period, conversationCount: progressNumber(point?.conversation?.count) ?? 0, readingCount: progressNumber(point?.reading?.count) ?? 0, wordsFirstSeen: progressNumber(point?.vocabulary?.wordsFirstSeen) ?? 0 }));
+  const max = Math.max(...chartPoints.flatMap(point => series.map(item => point[item.key])), 0);
+  if (!chartPoints.length || max === 0) return progressChart(container, progressEmptyChart("Pratique para começar a acompanhar sua evolução ao longo do tempo."), "Evolução: sem atividades no período");
+  progressChart(container, progressLineSvg(chartPoints, "Atividades por mês", series, Math.max(1, max), ""), "Atividades por mês: conversas, leituras e novas palavras");
+}
 function renderProgressBreakdown(container, rows, reading = false) {
   container.replaceChildren();
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -246,9 +441,10 @@ function renderProgress(data) {
   set("progress-word-count", v.totalWords); set("progress-word-new", v.newCount); set("progress-word-learning", v.learningCount); set("progress-word-reviewing", v.reviewingCount); set("progress-word-mastered", v.masteredCount); set("progress-word-due", v.dueForReview);
   progressElement("progress-vocabulary-period").textContent = data.period === "ALL_TIME" ? "Estado atual do seu vocabulário." : `${v.wordsFirstSeenInPeriod} encontradas e ${v.wordsReviewedInPeriod} com revisão mais recente no período.`;
   renderProgressBreakdown(progressElement("progress-conversation-difficulty"), c.byDifficulty); renderProgressBreakdown(progressElement("progress-reading-difficulty"), r.byDifficulty, true);
-  const timeline=progressElement("progress-timeline"); timeline.replaceChildren();
   const timelinePayload=data.timeline;
   const points=Array.isArray(timelinePayload) ? timelinePayload : Array.isArray(timelinePayload?.points) ? timelinePayload.points : Array.isArray(timelinePayload?.timeline) ? timelinePayload.timeline : [];
+  renderProgressConversationChart(progressElement("progress-conversation-chart"), points); renderProgressReadingChart(progressElement("progress-reading-chart"), r.byDifficulty); renderProgressVocabularyChart(progressElement("progress-vocabulary-chart"), v); renderProgressEvolutionChart(progressElement("progress-evolution-chart"), points);
+  const timeline=progressElement("progress-timeline"); timeline.replaceChildren();
   for(const point of points) { const conversation=point?.conversation||{}, reading=point?.reading||{}, vocabulary=point?.vocabulary||{}; const row=document.createElement("div"); row.className="progress-timeline-row"; const month=document.createElement("strong");month.textContent=point?.period||"—"; const conv=document.createElement("span");conv.textContent=`Conversação: ${progressValue(conversation.average)} (${conversation.count ?? 0})`; const read=document.createElement("span");read.textContent=`Leitura: ${progressValue(reading.average)} (${reading.count ?? 0})`; const words=document.createElement("span");words.textContent=`${vocabulary.wordsFirstSeen ?? 0} palavras novas`; row.append(month,conv,read,words); timeline.append(row); }
   progressElement("progress-content").hidden=false;
 }
@@ -272,6 +468,108 @@ async function loadProgress() {
   finally { finishLoading(); if(progressRequest===controller)progressRequest=null; }
 }
 document.querySelectorAll?.(".progress-period").forEach(button=>button.addEventListener("click",()=>{progressPeriod=button.dataset.period || "ALL_TIME";document.querySelectorAll(".progress-period").forEach(other=>other.classList.toggle("active",other===button));loadProgress();}));
+
+function homeElement(id) { return $(id); }
+function setHomeBusy(id, busy) { const element = homeElement(id); if (element) element.setAttribute("aria-busy", String(busy)); }
+function setHomeStatus(id, text = "") { const element = homeElement(id); if (element) element.textContent = text; }
+function validHomeVocabularyLesson(lesson) { return lesson && Array.isArray(lesson.words) && lesson.words.length === VOCABULARY_ITEMS_PER_LESSON; }
+function renderHomeVocabulary(lesson) {
+  const completed = Boolean(lesson?.progress?.completedAt);
+  const content = homeElement("home-vocabulary-content"), marker = homeElement("home-vocabulary-marker");
+  homeElement("home-vocabulary-loading").hidden = true;
+  content.hidden = false;
+  marker.textContent = completed ? "✓ Lição concluída" : "Lição disponível";
+  marker.classList.toggle("is-complete", completed);
+  homeElement("home-vocabulary-description").textContent = completed
+    ? "Você completou sua lição de hoje."
+    : "Sua lição de vocabulário ainda não foi concluída.";
+  homeElement("home-vocabulary-detail").textContent = completed
+    ? `${lesson.words.length} palavras praticadas hoje.`
+    : `${lesson.words.length} palavras preparadas para hoje.`;
+  homeElement("home-vocabulary-action").textContent = completed ? "Revisar vocabulário" : "Começar lição";
+  setHomeStatus("home-vocabulary-status");
+  setHomeBusy("home-vocabulary-card", false);
+}
+function renderHomeVocabularyError() {
+  homeElement("home-vocabulary-loading").hidden = true;
+  homeElement("home-vocabulary-content").hidden = true;
+  homeElement("home-vocabulary-marker").textContent = "";
+  setHomeStatus("home-vocabulary-status", "Não foi possível carregar sua lição de hoje.");
+  setHomeBusy("home-vocabulary-card", false);
+}
+function renderHomeProgress(data) {
+  const overview = data?.overview && typeof data.overview === "object" ? data.overview : {};
+  const number = value => Number.isFinite(value) ? String(value) : "—";
+  homeElement("home-progress-conversations").textContent = number(overview.conversationsCompleted);
+  homeElement("home-progress-readings").textContent = number(overview.readingsCompleted);
+  homeElement("home-progress-words").textContent = number(overview.wordsFirstSeen);
+  homeElement("home-progress-loading").hidden = true;
+  homeElement("home-progress-content").hidden = false;
+  setHomeStatus("home-progress-status");
+  setHomeBusy("home-progress-card", false);
+}
+function renderHomeProgressError() {
+  homeElement("home-progress-loading").hidden = true;
+  homeElement("home-progress-content").hidden = true;
+  setHomeStatus("home-progress-status", "Não foi possível carregar seu resumo agora.");
+  setHomeBusy("home-progress-card", false);
+}
+function resetHomeDashboard() {
+  homeDashboardVersion++;
+  homeVocabularyRequest?.abort(); homeProgressRequest?.abort();
+  homeVocabularyRequest = null; homeProgressRequest = null;
+  homeVocabularyLesson = null; homeVocabularyOwner = null;
+  loadingOperations.get("home-vocabulary-loading")?.finish();
+  loadingOperations.get("home-progress-loading")?.finish();
+}
+function loadHomeDashboard() {
+  const owner = appState.currentUser?.id;
+  if (!owner) return;
+  homeDashboardVersion++;
+  homeVocabularyRequest?.abort(); homeProgressRequest?.abort();
+  const version = homeDashboardVersion;
+  loadHomeVocabulary(owner, version);
+  loadHomeProgress(owner, version);
+}
+async function loadHomeVocabulary(owner, version) {
+  const controller = new AbortController(); homeVocabularyRequest = controller;
+  const current = () => homeVocabularyRequest === controller && version === homeDashboardVersion && appState.currentUser?.id === owner;
+  homeElement("home-vocabulary-content").hidden = true;
+  setHomeStatus("home-vocabulary-status"); setHomeBusy("home-vocabulary-card", true);
+  const finishLoading = startLoading("home-vocabulary-loading");
+  try {
+    const result = await authenticatedRequest("/api/v1/vocabulary/today", { signal: controller.signal });
+    if (!current()) return;
+    if (result.sessionInvalid || result.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    if (!result.response.ok || !validHomeVocabularyLesson(result.body)) return renderHomeVocabularyError();
+    homeVocabularyLesson = result.body; homeVocabularyOwner = owner;
+    renderHomeVocabulary(result.body);
+  } catch (error) {
+    if (current() && error?.name !== "AbortError") renderHomeVocabularyError();
+  } finally {
+    finishLoading();
+    if (homeVocabularyRequest === controller) homeVocabularyRequest = null;
+  }
+}
+async function loadHomeProgress(owner, version) {
+  const controller = new AbortController(); homeProgressRequest = controller;
+  const current = () => homeProgressRequest === controller && version === homeDashboardVersion && appState.currentUser?.id === owner;
+  homeElement("home-progress-content").hidden = true;
+  setHomeStatus("home-progress-status"); setHomeBusy("home-progress-card", true);
+  const finishLoading = startLoading("home-progress-loading");
+  try {
+    const result = await authenticatedRequest("/api/v1/progress?period=ALL_TIME", { signal: controller.signal });
+    if (!current()) return;
+    if (result.sessionInvalid || result.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
+    if (!result.response.ok || !result.body?.overview) return renderHomeProgressError();
+    renderHomeProgress(result.body);
+  } catch (error) {
+    if (current() && error?.name !== "AbortError") renderHomeProgressError();
+  } finally {
+    finishLoading();
+    if (homeProgressRequest === controller) homeProgressRequest = null;
+  }
+}
 function stopSpeech() {
   const speech = currentSpeech;
   if (!speech) return;
@@ -447,9 +745,12 @@ function updateConversationControls() {
     $("chat-message").disabled = true;
     $("record-chat").disabled = true;
   }
-  $("complete-conversation").disabled = !appState.currentConversation || closed || evaluating || activeChat !== null || recordingBusy || voiceState === "generating_speech";
+  const completionReady = conversationCanBeCompleted();
+  $("complete-conversation").disabled = !appState.currentConversation || closed || !completionReady || evaluating || activeChat !== null || recordingBusy || voiceState === "generating_speech";
   $("complete-conversation").textContent = evaluating ? "Avaliando sua conversa..." : closed ? "Conversa concluída" : "Encerrar conversa";
   $("complete-conversation").setAttribute("aria-busy", String(evaluating));
+  $("complete-conversation").setAttribute("aria-describedby", "conversation-progress-text");
+  $("complete-conversation").title = appState.currentConversation && !closed && !completionReady && !evaluating ? "Continue conversando para liberar esta opção." : "Encerrar conversa";
   document.querySelectorAll("[data-chat-mode]").forEach(button => button.disabled = evaluating || closed);
 }
 function renderConversationEvaluation(evaluation) {
@@ -495,7 +796,7 @@ function validConversationEvaluation(value, id) {
 }
 async function completeConversation() {
   const conversation = appState.currentConversation;
-  if (!conversation || conversation.endedAt || conversationCompletion || activeChat || recordingOperation || voiceState === "generating_speech") return;
+  if (!conversation || !conversationCanBeCompleted() || conversation.endedAt || conversationCompletion || activeChat || recordingOperation || voiceState === "generating_speech") return;
   const operation = { controller: new AbortController(), conversation, userId: appState.currentUser?.id };
   const isCurrent = () => conversationCompletion === operation && appState.currentConversation === conversation && appState.currentUser?.id === operation.userId;
   conversationCompletion = operation;
@@ -507,11 +808,13 @@ async function completeConversation() {
     if (r.response.status === 401) return showLogin("Sua sessão expirou. Entre novamente.");
     if (!r.response.ok) return setMessage("conversation-completion-status", errorMessage(r.response.status) + " Você pode tentar novamente.");
     if (r.body?.status === "INSUFFICIENT" && r.body.conversationId === conversation.id) {
-      return setMessage("conversation-completion-status", `Converse um pouco mais antes de encerrar para avaliarmos seu desempenho. Participação: ${r.body.currentUserMessages} de ${r.body.minimumUserMessages} mensagens necessárias.`);
+      updateConversationProgress();
+      return setMessage("conversation-completion-status", "Continue conversando antes de encerrar para avaliarmos seu desempenho.");
     }
     if (!validConversationEvaluation(r.body, conversation.id)) throw new Error("Invalid evaluation");
     conversation.endedAt = r.body.evaluatedAt;
     renderConversationEvaluation(r.body);
+    updateConversationProgress();
     setMessage("conversation-completion-status", "Avaliação salva. Você pode consultar o resultado no histórico.", true);
   } catch (error) {
     if (isCurrent() && error.name !== "AbortError") setMessage("conversation-completion-status", "Não foi possível avaliar a conversa. Tente novamente; seu histórico foi preservado.");
@@ -805,6 +1108,8 @@ async function sendChatMessage(message, language, options) {
       if (response.status === 401) showLogin("Sua sessão expirou. Entre novamente.");
       return;
     }
+    chatHistory.push({ role: "user", content: message });
+    updateConversationProgress();
     reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "", eventName = "", data = [];
@@ -824,7 +1129,7 @@ async function sendChatMessage(message, language, options) {
         if (!meta || typeof meta !== "object" || !assistant.bubble.textContent.trim()) throw new ChatStreamError("Invalid stream");
         chat.complete = true;
         if (!options.voice) setChatResponding(assistant, false);
-        chatHistory.push({ role: "user", content: message }, { role: "assistant", content: assistant.bubble.textContent });
+        chatHistory.push({ role: "assistant", content: assistant.bubble.textContent });
         speechAction = renderCompletedReply(assistant, message, language, meta, start, firstToken, options);
         if (options.voice) {
           assistant.chatActions && (assistant.chatActions.hidden = true);
@@ -896,8 +1201,8 @@ async function sendChatMessage(message, language, options) {
   }
 }
 
-function renderAvatars(){const grid=$("avatar-grid");if(!grid)return;grid.replaceChildren();if(!avatarCatalog.length){const empty=document.createElement("p");empty.textContent="Nenhum avatar disponível no momento.";grid.append(empty);return;}const selectedKey=profileDraftAvatarKey??currentProfile?.avatarKey;for(const a of avatarCatalog){const b=document.createElement("button");b.type="button";b.className="avatar-option";b.title=a.displayName;b.dataset.key=a.key;b.setAttribute("aria-pressed",String(selectedKey===a.key));const img=createAvatarElement({imageUrl:a.imageUrl,alt:`Avatar ${a.displayName}`,className:"profile-option-avatar"});const label=document.createElement("span");label.textContent=a.displayName;b.append(img,label);if(selectedKey===a.key)b.classList.add("selected");b.addEventListener("click",()=>{profileDraftAvatarKey=a.key;renderAvatars();});grid.append(b);}}
-let currentProfile=null, profileDraftAvatarKey=null;
+function renderAvatars(){const grid=$("avatar-grid");if(!grid)return;grid.replaceChildren();if(!avatarCatalog.length){const empty=document.createElement("p");empty.textContent="Nenhum avatar disponível no momento.";grid.append(empty);return;}const selectedKey=profileDraftAvatarKey??currentProfile?.avatarKey;avatarCatalog.forEach((avatar,index)=>{const button=document.createElement("button");button.type="button";button.className="avatar-option";button.dataset.key=avatar.key;button.setAttribute("aria-label",`Escolher aparência ${index+1}`);button.setAttribute("aria-pressed",String(selectedKey===avatar.key));const image=createAvatarElement({imageUrl:avatar.imageUrl,alt:`Avatar ${index+1}`,className:"profile-option-avatar"});const indicator=document.createElement("span");indicator.className="avatar-option-indicator";indicator.setAttribute("aria-hidden","true");indicator.textContent="✓";button.append(image,indicator);if(selectedKey===avatar.key)button.classList.add("selected");button.addEventListener("click",()=>{profileDraftAvatarKey=avatar.key;renderAvatars();renderProfileEditAvatar();});grid.append(button);});}
+let currentProfile=null, profileDraftAvatarKey=null, avatarPickerOpen=false;
 const goalLabels={GENERAL:"Geral",CONVERSATION:"Conversação",WORK:"Trabalho",TRAVEL:"Viagem",STUDY:"Estudos"};
 const englishLevelLabels={A1:"A1 — Iniciante",A2:"A2 — Básico",B1:"B1 — Intermediário",B2:"B2 — Intermediário superior",C1:"C1 — Avançado",C2:"C2 — Proficiente"};
 const difficultyForEnglishLevel=level=>({A1:"BEGINNER",A2:"BEGINNER",B1:"INTERMEDIATE",B2:"INTERMEDIATE",C1:"ADVANCED",C2:"ADVANCED"}[level]||"INTERMEDIATE");
@@ -906,12 +1211,21 @@ function createAvatarElement({imageUrl,alt="Avatar",className="avatar-image",fal
 function setAvatarTarget(slotId,url,alt,type="user"){const slot=$(slotId);if(!slot)return;slot.replaceChildren(createAvatarElement({imageUrl:url,alt,className:type==="assistant"?"assistant-avatar":"user-avatar",fallbackText:""}));}
 function setUserAvatar(key){const avatar=avatarCatalog.find(x=>x.key===key);const url=avatar?.imageUrl;setAvatarTarget("profile-avatar-slot",url,"Avatar atual","user");setAvatarTarget("header-avatar-slot",url,"Avatar do usuário","user");setAvatarTarget("account-avatar-slot",url,"Avatar do usuário","user");}
 function setAssistantAvatar(meta){const url=meta?.assistantAvatarImageUrl||meta?.imageUrl;setAvatarTarget("chat-assistant-avatar-slot",url,`Avatar de ${meta?.assistantDisplayName||"assistant"}`,"assistant");const box=$("chat-assistant");if(box)box.hidden=!meta;const name=$("chat-assistant-name"),description=$("chat-assistant-description");if(name)name.textContent=meta?.assistantDisplayName||"";if(description)description.textContent=meta?.description||"";}
-function renderProfileSummary(d){$("profile-summary-name").textContent=d?.preferredName||"Não informado";$("profile-summary-age").textContent=d?.age??"Não informado";$("profile-summary-level").textContent=englishLevelLabels[d?.englishLevel]||"Não informado";$("profile-summary-goal").textContent=goalLabels[d?.learningGoal]||"Não informado";$("profile-onboarding").textContent=d?.onboardingCompleted?"Concluído.":"Complete seu perfil para personalizar as conversas.";setUserAvatar(d?.avatarKey||"avatar_default");$("profile-edit-button").textContent=d?.onboardingCompleted?"Editar perfil":"Completar perfil";}
+function formatBirthDate(value){if(!value)return "Não informado";const [year,month,day]=value.split("-").map(Number);if(!year||!month||!day)return "Não informado";return new Intl.DateTimeFormat("pt-BR",{timeZone:"UTC"}).format(new Date(Date.UTC(year,month-1,day)));}
+function formatMemberSince(value){const date=value?new Date(value):null;if(!date||Number.isNaN(date.getTime()))return "";return new Intl.DateTimeFormat("pt-BR",{month:"long",year:"numeric"}).format(date);}
+function onboardingText(status){return status==="COMPLETED"?"Perfil concluído.":status==="DISMISSED"?"Lembrete automático desativado. Você pode editar o perfil quando quiser.":"Complete seu perfil para personalizar as conversas.";}
+function renderOnboardingOffer(profile=currentProfile){const offer=$("onboarding-offer");if(!offer)return;offer.hidden=profile?.onboardingStatus!=="PENDING"||onboardingDeferredForSession;}
+function renderProfileEditAvatar(){const key=profileDraftAvatarKey??currentProfile?.avatarKey;const avatar=avatarCatalog.find(item=>item.key===key);setAvatarTarget("profile-edit-avatar-slot",avatar?.imageUrl,"Avatar atual","user");}
+function setAvatarPickerOpen(open){avatarPickerOpen=open;const picker=$("avatar-picker"),button=$("profile-avatar-toggle");if(picker)picker.hidden=!open;if(button)button.setAttribute("aria-expanded",String(open));if(open)renderAvatars();}
+function setProfileEditing(editing){$("profile-summary").hidden=editing;$("profile-edit-panel").hidden=!editing;$("profile-summary-heading").hidden=editing;$("profile-edit-heading").hidden=!editing;}
+function renderProfileSummary(d){const user=appState.currentUser||{};const name=d?.preferredName||user.username||"Não informado",level=englishLevelLabels[d?.englishLevel]||"Não informado",goal=goalLabels[d?.learningGoal]||"Não informado";$("profile-summary-name").textContent=name;$("profile-information-name").textContent=name;$("profile-summary-username").textContent=user.username||"";$("profile-email").textContent=user.email||"Não informado";$("profile-summary-birth-date").textContent=formatBirthDate(d?.birthDate);$("profile-summary-level").textContent=level;$("profile-summary-goal").textContent=goal;$("profile-side-level").textContent=level;$("profile-side-goal").textContent=goal;$("profile-edit-side-level").textContent=level;$("profile-edit-side-goal").textContent=goal;$("profile-onboarding").textContent=onboardingText(d?.onboardingStatus);const memberSince=formatMemberSince(user.createdAt);$("profile-member-since").hidden=!memberSince;$("profile-member-since").textContent=memberSince?`Membro desde ${memberSince}`:"";const verifiedRow=$("profile-email-verified-row");verifiedRow.hidden=typeof user.emailVerified!=="boolean";$("profile-email-verified").textContent=user.emailVerified===true?"Confirmado":"Pendente";setUserAvatar(d?.avatarKey||"avatar_default");$("profile-edit-button").textContent=d?.onboardingStatus==="COMPLETED"?"Editar perfil":"Completar perfil";renderProfileEditAvatar();renderOnboardingOffer(d);}
 async function loadGlobalProfile(){const [p,a]=await Promise.all([authenticatedRequest("/api/v1/users/me/profile"),authenticatedRequest("/api/v1/avatars")]);if(!p.response.ok)throw Error("profile request failed");appState.profile=p.body||{};currentProfile=appState.profile;avatarCatalog=a.response.ok&&Array.isArray(a.body)?a.body:[];appState.avatars=avatarCatalog;renderProfileSummary(currentProfile);renderAvatars();return appState.profile;}
-async function loadProfileArea(){const needsFetch=!appState.profile;const finishLoading=needsFetch?startLoading("profile-loading"):()=>{};setMessage("profile-status");$("profile-summary").hidden=needsFetch;$("profile-edit-panel").hidden=true;try{if(needsFetch)await loadGlobalProfile();else{currentProfile=appState.profile;avatarCatalog=appState.avatars;renderProfileSummary(currentProfile);renderAvatars();}$("profile-summary").hidden=false;setMessage("profile-status");}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");}finally{finishLoading();}}
-function openProfileEdit(){const d=currentProfile||{};profileDraftAvatarKey=d.avatarKey||"avatar_default";$("profile-name").value=d.preferredName||"";$("profile-age").value=d.age??"";$("profile-level").value=d.englishLevel||"";$("profile-goal").value=d.learningGoal||"";$("profile-summary").hidden=true;$("profile-edit-panel").hidden=false;renderAvatars();$("profile-name").focus();}
-function closeProfileEdit(){profileDraftAvatarKey=null;$("profile-edit-panel").hidden=true;$("profile-summary").hidden=false;renderAvatars();}
-async function saveProfile(e){e.preventDefault();const saveButton=$("profile-save-button"),body={preferredName:$("profile-name").value||null,age:$("profile-age").value?Number($("profile-age").value):null,englishLevel:$("profile-level").value||null,learningGoal:$("profile-goal").value||null};saveButton.disabled=true;setButtonBusy(saveButton,true);setMessage("profile-status","Salvando perfil...");try{const profileResult=await authenticatedRequest("/api/v1/users/me/profile",{method:"PUT",body:JSON.stringify(body)});if(!profileResult.response.ok){setMessage("profile-status",profileResult.response.status===401?"Sua sessão expirou.":errorMessage(profileResult.response.status));return;}currentProfile=profileResult.body||{...currentProfile,...body};appState.profile=currentProfile;const avatarKey=profileDraftAvatarKey||currentProfile.avatarKey;if(avatarKey&&avatarKey!==currentProfile.avatarKey){const avatarResult=await authenticatedRequest("/api/v1/users/me/profile/avatar/predefined",{method:"PUT",body:JSON.stringify({avatarKey})});if(!avatarResult.response.ok){renderProfileSummary(currentProfile);setMessage("profile-status","Dados salvos, mas não foi possível atualizar o avatar. Tente salvar novamente.");return;}currentProfile=avatarResult.body||{...currentProfile,avatarKey};appState.profile=currentProfile;}renderProfileSummary(currentProfile);closeProfileEdit();setMessage("profile-status","Perfil salvo.",true);}catch(_){setMessage("profile-status","Não foi possível conectar ao servidor.");}finally{saveButton.disabled=false;setButtonBusy(saveButton,false);}}
+async function loadProfileArea(){const needsFetch=!appState.profile;const finishLoading=needsFetch?startLoading("profile-loading"):()=>{};setMessage("profile-status");setProfileEditing(false);setAvatarPickerOpen(false);$("profile-summary").hidden=needsFetch;try{if(needsFetch)await loadGlobalProfile();else{currentProfile=appState.profile;avatarCatalog=appState.avatars;renderProfileSummary(currentProfile);renderAvatars();}$("profile-summary").hidden=false;setMessage("profile-status");}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");}finally{finishLoading();}}
+function openProfileEdit(){const d=currentProfile||{};profileDraftAvatarKey=d.avatarKey||"avatar_default";$("profile-name").value=d.preferredName||"";$("profile-birth-date").value=d.birthDate||"";$("profile-level").value=d.englishLevel||"";$("profile-goal").value=d.learningGoal||"";setProfileEditing(true);setAvatarPickerOpen(false);renderAvatars();renderProfileEditAvatar();$("profile-name").focus();}
+function closeProfileEdit(){profileDraftAvatarKey=null;setAvatarPickerOpen(false);setProfileEditing(false);renderAvatars();}
+async function saveProfile(e){e.preventDefault();const saveButton=$("profile-save-button"),body={preferredName:$("profile-name").value||null,birthDate:$("profile-birth-date").value||null,englishLevel:$("profile-level").value||null,learningGoal:$("profile-goal").value||null};saveButton.disabled=true;setButtonBusy(saveButton,true);setMessage("profile-status","Salvando perfil...");try{const profileResult=await authenticatedRequest("/api/v1/users/me/profile",{method:"PUT",body:JSON.stringify(body)});if(!profileResult.response.ok){setMessage("profile-status",profileResult.response.status===401?"Sua sessão expirou.":errorMessage(profileResult.response.status));return;}currentProfile=profileResult.body||{...currentProfile,...body};appState.profile=currentProfile;const avatarKey=profileDraftAvatarKey||currentProfile.avatarKey;if(avatarKey&&avatarKey!==currentProfile.avatarKey){const avatarResult=await authenticatedRequest("/api/v1/users/me/profile/avatar/predefined",{method:"PUT",body:JSON.stringify({avatarKey})});if(!avatarResult.response.ok){renderProfileSummary(currentProfile);setMessage("profile-status","Dados salvos, mas não foi possível atualizar o avatar. Tente salvar novamente.");return;}currentProfile=avatarResult.body||{...currentProfile,avatarKey};appState.profile=currentProfile;}renderProfileSummary(currentProfile);closeProfileEdit();setMessage("profile-status","Perfil salvo.",true);}catch(_){setMessage("profile-status","Não foi possível conectar ao servidor.");}finally{saveButton.disabled=false;setButtonBusy(saveButton,false);}}
+async function openOnboardingProfile(){showView("profile");await loadProfileArea();openProfileEdit();}
+async function dismissOnboarding(){const button=$("onboarding-dismiss");button.disabled=true;setButtonBusy(button,true);setMessage("onboarding-status");try{const result=await authenticatedRequest("/api/v1/users/me/profile/onboarding/dismiss",{method:"POST"});if(!result.response.ok){setMessage("onboarding-status",errorMessage(result.response.status));return;}currentProfile=result.body||{...currentProfile,onboardingStatus:"DISMISSED"};appState.profile=currentProfile;renderProfileSummary(currentProfile);setMessage("onboarding-status");}catch(_){setMessage("onboarding-status","Não foi possível conectar ao servidor.");}finally{button.disabled=false;setButtonBusy(button,false);}}
 const CONVERSATION_LIMIT = 3;
 const conversationLimitMessage = "Você já possui 3 conversas ativas. Encerre ou exclua uma delas para iniciar outra.";
 const activeConversationCount = conversations => Array.isArray(conversations) ? conversations.filter(conversation => !conversation.endedAt).length : null;
@@ -922,25 +1236,145 @@ const conversationDifficulties = [
 ];
 const conversationDifficultyValues = new Set(conversationDifficulties.map(item => item.value));
 const conversationDifficultyLabels = Object.fromEntries(conversationDifficulties.map(item => [item.value, item.label]));
-function createDifficultyPicker(scenario) {
+const conversationDifficultySummaries = {
+  BEGINNER: "Conversas mais simples, com vocabulário comum e mais apoio.",
+  INTERMEDIATE: "Conversas mais naturais, com vocabulário variado e desafio moderado.",
+  ADVANCED: "Inglês mais natural, com vocabulário avançado e estruturas mais complexas."
+};
+const conversationDifficultyIcons = {
+  BEGINNER: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V10"/><path d="M12 14c-4 0-6-2-6-6 4 0 6 2 6 6ZM12 17c4 0 6-2 6-6-4 0-6 2-6 6Z"/></svg>',
+  INTERMEDIATE: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M5 12.5h3.5V20H5zM10.25 7h3.5v13h-3.5zM15.5 3h3.5v17h-3.5z"/></svg>',
+  ADVANCED: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="m4 8 3.2 2.4L10.5 5l3 5.4L17 8l3 9H4L4 8Zm2.7 11h10.6v2H6.7v-2Z"/></svg>'
+};
+function createConversationDifficultyPicker(scenario) {
   const fieldset = document.createElement("fieldset");
   fieldset.className = "conversation-difficulty-picker";
   const legend = document.createElement("legend");
-  legend.textContent = "Escolha a dificuldade";
+  legend.textContent = "Nível de dificuldade";
   fieldset.append(legend);
   const recommended = difficultyForEnglishLevel(currentProfile?.englishLevel);
-  const inputs = conversationDifficulties.map((difficulty, index) => {
+  const hasRecommendation = Boolean(currentProfile?.englishLevel);
+  const options = document.createElement("div");
+  options.className = "conversation-difficulty-options";
+  const summary = document.createElement("div");
+  summary.className = "conversation-difficulty-summary";
+  summary.setAttribute("aria-live", "polite");
+  const inputs = conversationDifficulties.map(difficulty => {
     const label = document.createElement("label");
-    label.className = "difficulty-option";
+    const isRecommended = difficulty.value === recommended && hasRecommendation;
+    label.className = `conversation-difficulty-option${isRecommended ? " is-recommended" : ""}`;
     const input = document.createElement("input");
     input.type = "radio";
     input.name = `difficulty-${scenario}`;
     input.value = difficulty.value;
     input.checked = difficulty.value === recommended;
+    const text = document.createElement("span");
+    text.className = "conversation-difficulty-option-label";
+    text.textContent = difficulty.label;
+    const indicator = document.createElement("span");
+    indicator.className = "conversation-difficulty-option-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    indicator.textContent = "✓";
+    label.append(input, text, indicator);
+    options.append(label);
+    return input;
+  });
+  const renderSummary = () => {
+    const selected = conversationDifficulties.find(difficulty => difficulty.value === inputs.find(input => input.checked)?.value) || conversationDifficulties[1];
+    const icon = document.createElement("span");
+    icon.className = `conversation-difficulty-summary-icon is-${selected.value.toLowerCase()}`;
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = conversationDifficultyIcons[selected.value];
+    const details = document.createElement("span");
+    details.className = "conversation-difficulty-summary-details";
+    const title = document.createElement("span");
+    title.className = "conversation-difficulty-summary-title";
+    const name = document.createElement("strong");
+    name.textContent = selected.label;
+    const cefr = document.createElement("small");
+    cefr.textContent = selected.cefr;
+    title.append(name, cefr);
+    details.append(title);
+    if (hasRecommendation) {
+      const badge = document.createElement("span");
+      badge.className = "conversation-difficulty-recommended";
+      badge.textContent = selected.value === recommended ? "Recomendado" : `Recomendado: ${conversationDifficultyLabels[recommended]}`;
+      details.append(badge);
+    }
+    const description = document.createElement("span");
+    description.className = "conversation-difficulty-summary-description";
+    description.textContent = conversationDifficultySummaries[selected.value];
+    details.append(description);
+    summary.replaceChildren(icon, details);
+  };
+  inputs.forEach(input => {
+    input.addEventListener("change", renderSummary);
+    input.addEventListener("click", renderSummary);
+  });
+  renderSummary();
+  fieldset.append(options, summary);
+  return { fieldset, selected: () => inputs.find(input => input.checked)?.value || "INTERMEDIATE" };
+}
+const readingDifficultyDescriptions = {
+  BEGINNER: "Textos mais simples, com vocabulário comum e mais apoio.",
+  INTERMEDIATE: "Textos mais naturais, com vocabulário mais variado e um pouco mais de desafio.",
+  ADVANCED: "Textos próximos do inglês real, com vocabulário avançado e estruturas mais complexas."
+};
+const readingDifficultyIcons = {
+  BEGINNER: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V10"/><path d="M12 14c-4 0-6-2-6-6 4 0 6 2 6 6ZM12 17c4 0 6-2 6-6-4 0-6 2-6 6Z"/></svg>',
+  INTERMEDIATE: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M5 12.5h3.5V20H5zM10.25 7h3.5v13h-3.5zM15.5 3h3.5v17h-3.5z"/></svg>',
+  ADVANCED: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="m4 8 3.2 2.4L10.5 5l3 5.4L17 8l3 9H4L4 8Zm2.7 11h10.6v2H6.7v-2Z"/></svg>'
+};
+function createReadingDifficultyPicker() {
+  const fieldset = document.createElement("fieldset");
+  fieldset.className = "reading-difficulty-picker";
+  fieldset.setAttribute("aria-labelledby", "reading-level-heading");
+  const legend = document.createElement("legend");
+  legend.textContent = "Escolha seu nível";
+  fieldset.append(legend);
+  const recommended = difficultyForEnglishLevel(currentProfile?.englishLevel);
+  const inputs = conversationDifficulties.map(difficulty => {
+    const isRecommended = difficulty.value === recommended && Boolean(currentProfile?.englishLevel);
+    const label = document.createElement("label");
+    label.className = `reading-difficulty-card${isRecommended ? " is-recommended" : ""}`;
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "difficulty-reading";
+    input.value = difficulty.value;
+    input.checked = difficulty.value === recommended;
     const content = document.createElement("span");
-    const features = difficulty.features.map(feature => `<li>${feature}</li>`).join("");
-    const badge = difficulty.value === recommended && currentProfile?.englishLevel ? "<b class=\"difficulty-recommended\">Recomendado para você</b>" : "";
-    content.innerHTML = `<strong>${difficulty.label}</strong><small>${difficulty.cefr}</small><em>${difficulty.hint}</em><ul>${features}</ul>${badge}`;
+    content.className = "reading-difficulty-card-content";
+    const header = document.createElement("span");
+    header.className = "reading-difficulty-card-header";
+    const icon = document.createElement("span");
+    icon.className = `reading-difficulty-icon is-${difficulty.value.toLowerCase()}`;
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = readingDifficultyIcons[difficulty.value];
+    const details = document.createElement("span");
+    details.className = "reading-difficulty-details";
+    if (isRecommended) {
+      const badge = document.createElement("b");
+      badge.className = "reading-difficulty-recommended";
+      badge.textContent = "Recomendado para você";
+      details.append(badge);
+    }
+    const title = document.createElement("span");
+    title.className = "reading-difficulty-title";
+    const name = document.createElement("strong");
+    name.textContent = difficulty.label;
+    const cefr = document.createElement("small");
+    cefr.textContent = difficulty.cefr;
+    title.append(name, cefr);
+    details.append(title);
+    const indicator = document.createElement("span");
+    indicator.className = "reading-difficulty-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    indicator.textContent = "✓";
+    header.append(icon, details, indicator);
+    const description = document.createElement("span");
+    description.className = "reading-difficulty-description";
+    description.textContent = readingDifficultyDescriptions[difficulty.value];
+    content.append(header, description);
     label.append(input, content);
     fieldset.append(label);
     return input;
@@ -948,8 +1382,8 @@ function createDifficultyPicker(scenario) {
   return { fieldset, selected: () => inputs.find(input => input.checked)?.value || "INTERMEDIATE" };
 }
 const conversationModes = [
-  { value: "text", label: "Texto", hint: "Converse escrevendo e leia as respostas da IA.", features: ["Digite suas mensagens", "Respostas em texto", "Ideal para praticar escrita e leitura"] },
-  { value: "voice", label: "Voz", hint: "Converse falando e ouça as respostas da IA.", features: ["Use o microfone", "Respostas reproduzidas automaticamente", "Ideal para praticar fala e compreensão auditiva"] }
+  { value: "text", label: "Texto", hint: "Escreva e leia as respostas.", icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 15a3 3 0 0 1-3 3H8l-4 3v-3.5A4.5 4.5 0 0 1 2 14V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v8Z"/><path d="M7 9h7M7 13h5"/></svg>' },
+  { value: "voice", label: "Voz", hint: "Fale e ouça as respostas.", icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg>' }
 ];
 function createModePicker(scenario) {
   const fieldset = document.createElement("fieldset");
@@ -959,18 +1393,33 @@ function createModePicker(scenario) {
   fieldset.append(legend);
   const inputs = conversationModes.map(mode => {
     const label = document.createElement("label");
-    label.className = "mode-option";
+    label.className = "conversation-mode-option";
     const input = document.createElement("input");
     input.type = "radio"; input.name = `conversation-mode-${scenario}`; input.value = mode.value; input.checked = mode.value === "text";
     const content = document.createElement("span");
-    content.innerHTML = `<strong>${mode.label}</strong><em>${mode.hint}</em><ul>${mode.features.map(feature => `<li>${feature}</li>`).join("")}</ul>`;
+    content.className = "conversation-mode-option-content";
+    const icon = document.createElement("span");
+    icon.className = "conversation-mode-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = mode.icon;
+    const details = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = mode.label;
+    const hint = document.createElement("em");
+    hint.textContent = mode.hint;
+    details.append(title, hint);
+    const indicator = document.createElement("span");
+    indicator.className = "conversation-mode-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    indicator.textContent = "✓";
+    content.append(icon, details, indicator);
     label.append(input, content); fieldset.append(label); return input;
   });
   return { fieldset, selected: () => inputs.find(input => input.checked)?.value || "text" };
 }
 function updateScenarioCapacity() {
   for (const card of $("scenario-list").children) {
-    const button = [...card.children].find(child => child.className === "primary");
+    const button = [...card.children].find(child => child.className === "primary" || child.classList?.contains("conversation-start"));
     if (button) button.disabled = appState.conversationCount == null || appState.conversationCount >= CONVERSATION_LIMIT || !!pendingConversationCreation;
   }
 }
@@ -991,13 +1440,16 @@ async function loadScenarios(){
   for(const sc of scenarioCatalog){
     const card=document.createElement("article"); card.className="catalog-card scenario-card card";
     const avatarUrl=sc.assistantAvatarImageUrl||sc.imageUrl;
-    card.append(createAvatarElement({imageUrl:avatarUrl,alt:`Avatar de ${sc.assistantDisplayName||"assistant"}`,className:"scenario-avatar",fallbackText:""}));
+    const header=document.createElement("header"); header.className="scenario-card-header";
+    header.append(createAvatarElement({imageUrl:avatarUrl,alt:`Avatar de ${sc.assistantDisplayName||"assistant"}`,className:"scenario-avatar",fallbackText:""}));
+    const identity=document.createElement("div"); identity.className="scenario-identity";
     const h=document.createElement("h3");h.textContent=sc.displayName||"Cenário";
     const assistant=document.createElement("p");assistant.className="scenario-assistant-name";assistant.textContent=sc.assistantDisplayName||"";
-    const description=document.createElement("p");description.textContent=sc.description||"";
-    const difficultyPicker=createDifficultyPicker(sc.id), modePicker=createModePicker(sc.id);
-    const b=document.createElement("button");b.className="primary";b.textContent="Iniciar conversa";b.addEventListener("click",()=>createConversation(sc.id,b,difficultyPicker.selected(),modePicker.selected()));
-    card.append(h,assistant,description,difficultyPicker.fieldset,modePicker.fieldset,b);list.append(card);
+    identity.append(h,assistant); header.append(identity);
+    const description=document.createElement("p");description.className="scenario-description";description.textContent=sc.description||"";
+    const difficultyPicker=createConversationDifficultyPicker(sc.id), modePicker=createModePicker(sc.id);
+    const b=document.createElement("button");b.className="primary";b.classList.add("conversation-start");b.textContent="Iniciar conversa";b.addEventListener("click",()=>createConversation(sc.id,b,difficultyPicker.selected(),modePicker.selected()));
+    card.append(header,description,difficultyPicker.fieldset,modePicker.fieldset,b);list.append(card);
   }
   list.hidden=false; updateScenarioCapacity();
   setMessage("scenario-status", appState.conversationCount == null ? "Não foi possível verificar suas conversas. Abra Cenários novamente para tentar." : appState.conversationCount >= CONVERSATION_LIMIT ? conversationLimitMessage : "");
@@ -1046,20 +1498,68 @@ async function createConversation(scenario, button, difficulty = "INTERMEDIATE",
 }
 
 function formatConversationDate(value) { if (!value) return ""; const date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date); }
+function renderConversationMetrics(conversations) {
+  const hasData = Array.isArray(conversations), total = hasData ? conversations.length : null, completed = hasData ? conversations.filter(conversation => conversation.endedAt).length : null;
+  $("conversation-total").textContent = total == null ? "—" : String(total);
+  $("conversation-completed").textContent = completed == null ? "—" : String(completed);
+  $("conversation-active").textContent = total == null ? "—" : String(total - completed);
+}
+function updateConversationFilterControls() {
+  ["all", "active", "completed"].forEach(filter => { const button = $(`conversation-filter-${filter}`), selected = conversationHistoryFilter === filter; button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected)); });
+}
+function matchesConversationSearch(conversation) {
+  const query = conversationHistoryQuery.trim().toLocaleLowerCase();
+  if (!query) return true;
+  return [conversation.scenarioDisplayName, conversation.title, conversation.assistantDisplayName].some(value => String(value || "").toLocaleLowerCase().includes(query));
+}
+function matchesConversationFilter(conversation) { return conversationHistoryFilter === "active" ? !conversation.endedAt : conversationHistoryFilter === "completed" ? Boolean(conversation.endedAt) : true; }
+function createConversationEmptyState({ filtered = false } = {}) {
+  const empty = document.createElement("section"); empty.className = `conversation-empty-state${filtered ? " is-filtered" : ""}`;
+  const title = document.createElement("h2"), description = document.createElement("p");
+  title.textContent = filtered ? "Nenhuma conversa encontrada." : "Você ainda não iniciou nenhuma conversa.";
+  description.textContent = filtered ? "Tente ajustar os filtros ou a busca." : "Escolha um cenário e comece a praticar com seu tutor de IA.";
+  empty.append(title, description);
+  if (!filtered) { const start = document.createElement("button"); start.className = "primary"; start.type = "button"; start.textContent = "Começar uma conversa →"; start.onclick = () => { appState.conversationNavigationContext = "new"; showView("scenarios"); }; empty.append(start); }
+  return empty;
+}
+function renderConversationHistory() {
+  const list = $("conversation-list"), footer = $("conversation-footer-banner"), filtered = conversationHistory.filter(conversation => matchesConversationFilter(conversation) && matchesConversationSearch(conversation));
+  updateConversationFilterControls(); list.replaceChildren();
+  if (!conversationHistory.length) { list.append(createConversationEmptyState()); footer.hidden = true; list.hidden = false; return; }
+  if (!filtered.length) { list.append(createConversationEmptyState({ filtered: true })); footer.hidden = false; list.hidden = false; return; }
+  for (const conversation of filtered) {
+    const card = document.createElement("article"); card.className = `conversation-history-card card ${conversation.endedAt ? "conversation-ended" : "conversation-active"}`; card.setAttribute("role", "listitem");
+    const avatar = createAvatarElement({ imageUrl: conversation.assistantAvatarImageUrl, alt: `Avatar de ${conversation.assistantDisplayName || "assistente"}`, className: "conversation-avatar", fallbackText: "" });
+    const content = document.createElement("div"); content.className = "conversation-history-content";
+    const heading = document.createElement("div"); heading.className = "conversation-history-heading";
+    const title = document.createElement("h2"); title.textContent = conversation.scenarioDisplayName || conversation.title || "Conversa";
+    const state = document.createElement("span"); state.className = "conversation-state"; state.textContent = conversation.endedAt ? "✓ Concluída" : "● Em andamento";
+    const assistant = document.createElement("p"); assistant.className = "scenario-assistant-name"; assistant.textContent = conversation.assistantDisplayName || "";
+    const metadata = document.createElement("p"); metadata.className = "conversation-history-meta";
+    const difficulty = conversationDifficultyLabels[conversation.difficulty] || conversationDifficultyLabels.INTERMEDIATE, date = formatConversationDate(conversation.updatedAt);
+    metadata.textContent = `${difficulty}${date ? ` · Atualizada em ${date}` : ""}`;
+    heading.append(title, state); content.append(heading, assistant, metadata);
+    const actions = document.createElement("div"); actions.className = "conversation-history-actions";
+    const open = document.createElement("button"); open.className = "secondary conversation-open"; open.type = "button"; open.textContent = "Abrir conversa →";
+    open.onclick = () => { open.disabled = true; setButtonBusy(open, true); open.textContent = "Carregando..."; return openConversation(conversation.id, undefined, { navigationContext: "history" }).finally(() => { open.disabled = false; setButtonBusy(open, false); open.textContent = "Abrir conversa →"; }); };
+    actions.append(open);
+    if (!conversation.endedAt) { const remove = document.createElement("button"); remove.className = "button-danger conversation-delete"; remove.type = "button"; remove.textContent = "Excluir"; remove.onclick = () => deleteConversation(conversation.id); actions.append(remove); }
+    card.append(avatar, content, actions); list.append(card);
+  }
+  footer.hidden = false; list.hidden = false;
+}
 async function loadConversations(){
   const version=conversationLoadVersion;
   const finishLoading = startLoading("conversation-loading");
-  const list=$("conversation-list"); list.hidden=true;
+  const list=$("conversation-list"); list.hidden=true; $("conversation-footer-banner").hidden = true; renderConversationMetrics(null);
   setMessage("conversation-status");
   try {
     const r=await authenticatedRequest("/api/v1/conversations");
     if(version!==conversationLoadVersion || !appState.currentUser)return;
     if(!r.response.ok){setMessage("conversation-status",errorMessage(r.response.status));return;}
-    appState.conversationCount = activeConversationCount(r.body);
-    list.replaceChildren();
-    if(!Array.isArray(r.body)||!r.body.length){const empty=document.createElement("p");empty.textContent="Nenhuma conversa ainda. Escolha um cenário para começar.";list.append(empty);list.hidden=false;setMessage("conversation-status");return;}
-    for(const c of r.body){const card=document.createElement("article");card.className=`catalog-card conversation-card card ${c.endedAt?"conversation-ended":"conversation-active"}`;const avatarUrl=c.assistantAvatarImageUrl;card.append(createAvatarElement({imageUrl:avatarUrl,alt:`Avatar de ${c.assistantDisplayName||""}`,className:"conversation-avatar"}));const h=document.createElement("h3");h.textContent=c.scenarioDisplayName||c.title||"Conversa";const assistant=document.createElement("p");assistant.className="scenario-assistant-name";assistant.textContent=c.assistantDisplayName||"";const state=document.createElement("small");state.className="conversation-state";state.textContent=c.endedAt?"✓ Encerrada":"● Ativa";const meta=document.createElement("small");const date=formatConversationDate(c.updatedAt), difficulty=conversationDifficultyLabels[c.difficulty]||conversationDifficultyLabels.INTERMEDIATE;meta.textContent=`${difficulty}${date?` · Atualizada em ${date}`:""}`;const actions=document.createElement("div");const open=document.createElement("button");open.className="secondary";open.textContent="Abrir";open.onclick=()=>{open.disabled=true;setButtonBusy(open,true);open.textContent="Carregando...";return openConversation(c.id, undefined, { navigationContext: "history" }).finally(()=>{open.disabled=false;setButtonBusy(open,false);open.textContent="Abrir";});};actions.append(open);if(!c.endedAt){const del=document.createElement("button");del.className="button-danger";del.textContent="Excluir";del.onclick=()=>deleteConversation(c.id);actions.append(del);}card.append(h,assistant,state,meta,actions);list.append(card);}
-    list.hidden=false; setMessage("conversation-status");
+    conversationHistory = Array.isArray(r.body) ? r.body : [];
+    appState.conversationCount = activeConversationCount(conversationHistory);
+    renderConversationMetrics(conversationHistory); renderConversationHistory(); setMessage("conversation-status");
   } catch (_) {
     if(version===conversationLoadVersion && appState.currentUser)setMessage("conversation-status","Não foi possível carregar as conversas.");
   } finally {
@@ -1086,9 +1586,11 @@ async function openConversation(id, expectedScenario, options = {}) {
     }
     // Only a complete, ownership-checked Backend detail can become the active conversation.
     appState.currentConversation = conversation;
+    chatHistory = detail.messages.map(message => ({ role: message.role.toLowerCase(), content: message.content }));
     $("chat-language").value = conversation.language;
     $("chat-language").disabled = true;
     setAssistantAvatar(conversation);
+    updateConversationProgress();
     let openingItem;
     for (const message of detail.messages) {
       const item = appendChatMessage(message.role.toLowerCase(), message.content);
@@ -1129,7 +1631,8 @@ async function openConversation(id, expectedScenario, options = {}) {
 
 async function deleteConversation(id, options = {}) { if (!window.confirm("Excluir esta conversa? Todas as mensagens desta conversa serão removidas permanentemente.")) return; const r = await authenticatedRequest(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }); const statusId = options.statusId || "conversation-status"; if (!r.response.ok) return setMessage(statusId, errorMessage(r.response.status)); if (appState.currentConversation?.id === id) { if (options.navigateToNew) { appState.conversationNavigationContext = "new"; clearCurrentConversation(); await showView("scenarios"); } else showView("conversations"); } await loadConversations(); if (appState.currentView === "scenarios") await loadScenarios(); }
 try { $("profile-form").addEventListener("submit",saveProfile); } catch (_) {}
-try { $("profile-edit-button").addEventListener("click",openProfileEdit); $("profile-cancel-button").addEventListener("click",closeProfileEdit); } catch (_) {}
+try { $("profile-edit-button").addEventListener("click",openProfileEdit); $("profile-cancel-button").addEventListener("click",closeProfileEdit); $("profile-avatar-toggle").addEventListener("click",()=>setAvatarPickerOpen(!avatarPickerOpen)); } catch (_) {}
+try { $("onboarding-complete").addEventListener("click",openOnboardingProfile); $("onboarding-later").addEventListener("click",()=>{onboardingDeferredForSession=true;renderOnboardingOffer();}); $("onboarding-dismiss").addEventListener("click",dismissOnboarding); } catch (_) {}
 document.querySelectorAll('[data-view="profile"]').forEach(b=>b.addEventListener("click",loadProfileArea));
 $("delete-conversation").addEventListener("click", () => deleteConversation(appState.currentConversation?.id, { navigateToNew: true, statusId: "conversation-completion-status" }));
 
@@ -1140,14 +1643,14 @@ const validUuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4
 const readingState = { picker: null, current: null, generation: null, hint: null, hintConsumed: false, questions: null, questionGeneration: null, submission: null, answers: new Map(), score: 0 };
 function prepareReading() {
   if (!readingState.picker) {
-    readingState.picker = createDifficultyPicker("reading");
+    readingState.picker = createReadingDifficultyPicker();
     $("reading-difficulty").replaceChildren(readingState.picker.fieldset);
   }
 }
 function updateReadingControls() {
   const generating = !!readingState.generation, hinting = !!readingState.hint, generatingQuestions = !!readingState.questionGeneration;
   $("reading-generate").disabled = generating;
-  $("reading-generate").textContent = generating ? "Gerando texto..." : "Gerar texto";
+  $("reading-generate").textContent = generating ? "Gerando leitura..." : "Gerar leitura";
   $("reading-generate").setAttribute("aria-busy", String(generating));
   $("reading-hint").disabled = generating || hinting || readingState.hintConsumed || !readingState.current;
   $("reading-hint").textContent = hinting ? "Preparando dica..." : readingState.hintConsumed ? "✓ Dica consultada" : "Dica";
@@ -1197,7 +1700,7 @@ async function generateReading() {
   setMessage("reading-hint-status"); setMessage("reading-speech-status"); setMessage("reading-questions-status");
   const controller = new AbortController(); readingState.generation = controller;
   const difficulty = readingState.picker.selected(), topic = $("reading-topic").value;
-  updateReadingControls(); setMessage("reading-status", "Gerando texto...");
+  updateReadingControls(); setMessage("reading-status", "Gerando leitura...");
   try {
     const result = await authenticatedRequest("/api/v1/reading/generate", { method: "POST", signal: controller.signal, body: JSON.stringify({ difficulty, topic }) });
     if (readingState.generation !== controller) return;
@@ -1400,6 +1903,7 @@ function updateVocabularyExerciseProgress() {
 function showVocabularyCompletion() {
   const lesson = vocabularyState.lesson;
   if (!lesson?.progress?.completedAt) return;
+  if (homeVocabularyOwner === vocabularyState.ownerId) renderHomeVocabulary(lesson);
   $("vocabulary-study-complete").hidden = true;
   $("vocabulary-exercises").hidden = true;
   $("vocabulary-completion-quiz").textContent = `${lesson.progress.quizScore}/${VOCABULARY_QUIZ_QUESTION_COUNT} no quiz`;
@@ -1447,6 +1951,11 @@ function renderCurrentVocabularyWord() {
 }
 
 function renderVocabulary(lesson, ownerId = appState.currentUser?.id) {
+  if (ownerId && ownerId === appState.currentUser?.id && validHomeVocabularyLesson(lesson)) {
+    homeVocabularyLesson = lesson;
+    homeVocabularyOwner = ownerId;
+    renderHomeVocabulary(lesson);
+  }
   vocabularyState.lesson = lesson;
   vocabularyState.ownerId = ownerId;
   vocabularyState.currentWordIndex = 0;
@@ -1766,4 +2275,4 @@ $("vocabulary-review-button").addEventListener("click", () => {
 });
 window.addEventListener("pagehide",resetVocabulary);
 
-const googleScript = document.createElement("script"); googleScript.src = "https://accounts.google.com/gsi/client"; googleScript.async = true; googleScript.onload = prepareGoogle; document.head.appendChild(googleScript); setVoiceState("idle"); showHome();
+const googleScript = document.createElement("script"); googleScript.src = "https://accounts.google.com/gsi/client"; googleScript.async = true; googleScript.onload = prepareGoogle; document.head.appendChild(googleScript); setVoiceState("idle"); showHome({ preserveManualAuthNavigation: true });

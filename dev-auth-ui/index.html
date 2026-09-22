@@ -19,7 +19,7 @@
         </div>
       </div>
       <div class="auth-main">
-        <div class="login-card card">
+        <div id="login-card" class="login-card auth-card card">
           <span class="eyebrow">BOM TER VOCÊ AQUI</span>
           <h2>Bem-vindo de volta.</h2>
           <p class="muted">Entre para continuar sua jornada com o inglês.</p>
@@ -33,6 +33,39 @@
           <div class="separator"><span>ou continue com</span></div>
           <div id="google-button"></div>
           <p id="message" class="message" role="alert" aria-live="polite"></p>
+          <p class="auth-switch">Não tem uma conta? <button id="show-register" class="text-button" type="button">Cadastre-se</button></p>
+        </div>
+        <div id="register-card" class="register-card auth-card card" hidden>
+          <span class="eyebrow">COMECE SUA JORNADA</span>
+          <h2>Criar sua conta.</h2>
+          <p class="muted">Crie seu acesso para praticar inglês com o EnglishAI.</p>
+          <form id="register-form" tabindex="-1">
+            <label for="register-username">Nome de usuário</label>
+            <input id="register-username" type="text" autocomplete="username" minlength="3" maxlength="100" required>
+            <label for="register-email">E-mail</label>
+            <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required>
+            <label for="register-password">Senha</label>
+            <input id="register-password" type="password" autocomplete="new-password" minlength="6" maxlength="100" required>
+            <small class="field-hint">Use de 6 a 100 caracteres e no máximo 72 bytes.</small>
+            <label for="register-password-confirm">Confirmar senha</label>
+            <input id="register-password-confirm" type="password" autocomplete="new-password" minlength="6" maxlength="100" required>
+            <button id="register-submit" class="primary action" type="submit">Criar conta</button>
+          </form>
+          <p id="register-message" class="message" role="alert" aria-live="polite"></p>
+          <p class="auth-switch">Já tem uma conta? <button id="show-login" class="text-button" type="button">Entrar</button></p>
+        </div>
+        <div id="verification-card" class="verification-card auth-card card" hidden>
+          <span class="eyebrow">CONFIRME SEU E-MAIL</span>
+          <h2>Confirme seu e-mail.</h2>
+          <p class="muted">Enviamos um código de confirmação para <strong id="verification-email"></strong>.</p>
+          <form id="verification-form" tabindex="-1">
+            <label for="verification-code">Código de confirmação</label>
+            <input id="verification-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
+            <button id="verification-submit" class="primary action" type="submit">Confirmar e-mail</button>
+          </form>
+          <p id="verification-message" class="message" role="alert" aria-live="polite"></p>
+          <button id="resend-verification" class="text-button verification-resend" type="button" disabled>Reenviar código em 60s</button>
+          <p class="auth-switch"><button id="verification-back-login" class="text-button" type="button">Voltar para o login</button></p>
         </div>
         <p class="auth-footnote">Seu próximo passo começa com uma conversa.</p>
       </div>
@@ -44,7 +77,7 @@
           <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Recolher menu" aria-expanded="true" title="Recolher menu"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6M8 12h12"/></svg></button>
           <div class="logo"><span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 5h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 3v-3a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z"/><path d="M8 10h8M8 14h5"/></svg></span><span>English<span class="brand-accent">AI</span></span></div>
           <span class="nav-caption">SEU ESPAÇO</span>
-          <nav aria-label="Navegação principal">
+          <nav id="primary-nav" aria-label="Navegação principal"><button class="nav-item primary-nav-item active" data-view="home" type="button" aria-current="page" title="Início"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg><span>Início</span></button><button class="nav-item primary-nav-item" data-view="practice" type="button" title="Praticar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/></svg><span>Praticar</span></button><button class="nav-item primary-nav-item" data-view="conversations" type="button" title="Conversas"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/><path d="M7 10h10M7 14h6"/></svg><span>Conversas</span></button><button class="nav-item primary-nav-item" data-view="progress" type="button" title="Meu Progresso"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/></svg><span>Meu Progresso</span></button><button class="nav-item primary-nav-item nav-item-profile" data-view="profile" type="button" title="Perfil"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span>Perfil</span></button></nav><nav aria-label="Navegação legada" hidden aria-hidden="true">
             <button class="nav-item" data-view="progress" type="button" title="Meu Progresso"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/></svg><span>Meu Progresso</span></button>
             <button class="nav-item active" data-view="home" type="button" aria-current="page" title="Início"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg><span>Início</span></button>
             <button class="nav-item" data-view="translate" type="button" title="Traduzir"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 3v2M6 5c1 5 4 8 8 10M13 5c-1 5-5 9-10 11M14 21l4-10 4 10M15.5 17h5"/></svg><span>Traduzir</span></button>
@@ -66,23 +99,50 @@
           </header>
           <div id="main-content" class="content" tabindex="-1">
             <section id="view-home" class="page-view">
-              <div class="page-heading"><div><span class="eyebrow">UM NOVO PASSO, TODOS OS DIAS</span><h1>Olá, <span id="username"></span>.</h1><p class="muted">Que tal dar um pouco de espaço para o seu inglês hoje?</p></div></div>
+              <div class="page-heading home-heading"><div><span class="eyebrow">SEU RITMO, HOJE</span><h1>Olá, <span id="username"></span>.</h1><p class="muted">Escolha um pequeno passo para praticar inglês hoje.</p></div></div>
               <p id="home-message" class="message" role="alert" aria-live="polite"></p>
+              <div class="home-status-grid">
+                <section id="home-vocabulary-card" class="home-vocabulary-card card" aria-labelledby="home-vocabulary-title" aria-busy="false">
+                <div class="home-card-heading"><div><span class="eyebrow">VOCABULÁRIO DE HOJE</span><h2 id="home-vocabulary-title">Sua prática diária</h2></div><span id="home-vocabulary-marker" class="home-status-marker" aria-live="polite"></span></div>
+                <div id="home-vocabulary-loading" class="home-card-loading" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando sua lição...</span></div>
+                <div id="home-vocabulary-content" class="home-card-content" hidden><p id="home-vocabulary-description"></p><p id="home-vocabulary-detail" class="muted"></p><button id="home-vocabulary-action" class="secondary" type="button" data-view="vocabulary">Abrir vocabulário</button></div>
+                <p id="home-vocabulary-status" class="home-card-status" role="status" aria-live="polite"></p>
+                </section>
+                <section id="onboarding-offer" class="onboarding-offer card" aria-labelledby="onboarding-title" hidden>
+                <div class="onboarding-content"><h2 id="onboarding-title">Complete seu perfil</h2><p class="muted">Personalize sua experiência.</p></div>
+                <div class="onboarding-actions"><button id="onboarding-complete" class="secondary" type="button">Completar</button><button id="onboarding-later" class="text-button" type="button">Agora não</button><button id="onboarding-dismiss" class="text-button" type="button">Não mostrar novamente</button></div>
+                <p id="onboarding-status" class="message" role="status" aria-live="polite"></p>
+                </section>
+              </div>
               <div class="home-hero">
-                <div><span class="pill"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg> Seu tutor de idiomas</span><h2>O melhor jeito de aprender<br>é começar a conversar.</h2><p>Fale sobre o seu dia, pratique uma entrevista ou explore um assunto novo. No seu ritmo.</p><button class="primary" type="button" data-view="chat">Começar uma conversa <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></div>
-                <div class="hero-art" aria-hidden="true"><span class="art-orbit"></span><div class="art-chat"><span class="mini-avatar">AI</span><span>Let's talk.</span><i></i><i></i></div><div class="art-reply">One conversation.<br>New possibilities.</div></div>
+                <div class="conversation-hero-content"><span class="pill"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg> Seu tutor de idiomas</span><h2>O melhor jeito de aprender<br>é começar a conversar.</h2><p>Fale sobre o seu dia, pratique uma entrevista ou explore um assunto novo. No seu ritmo.</p><button class="primary" type="button" data-view="chat">Começar uma conversa <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></div>
+                <div class="conversation-hero-illustration" aria-hidden="true"><img src="assets/conversation-hero.png" alt="" width="1774" height="887" decoding="async"></div>
               </div>
-              <div class="section-heading"><h2>Explore suas palavras</h2><span class="muted">Ferramentas para ir além</span></div>
+              <div class="section-heading"><h2>Continue aprendendo</h2><span class="muted">Escolha uma habilidade para praticar</span></div>
               <div class="feature-grid">
-                <button class="feature-card" data-view="translate" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 3v2M6 5c1 5 4 8 8 10M13 5c-1 5-5 9-10 11M14 21l4-10 4 10M15.5 17h5"/></svg></b><strong>Encontre a palavra certa</strong><span>Traduza entre português e inglês com clareza.</span><span class="feature-link">Traduzir <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
-                <button class="feature-card" data-view="correct" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg></b><strong>Aprenda com a escrita</strong><span>Revise uma frase e entenda como melhorar.</span><span class="feature-link">Corrigir <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
-                <button class="feature-card" data-view="chat" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></b><strong>Dê voz ao seu inglês</strong><span>Escolha o modo Voz e pratique uma conversa.</span><span class="feature-link">Conversar <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+                <button class="feature-card" data-view="reading" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"/><path d="M4 19h16M8 7h8M8 11h7"/></svg></b><strong>Leitura</strong><span>Pratique a compreensão com textos adaptados ao seu nível.</span><span class="feature-link">Praticar leitura <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+                <button class="feature-card" data-view="correct" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 3 3 5-6"/><rect x="3" y="3" width="18" height="18" rx="5"/></svg></b><strong>Correção</strong><span>Melhore frases em inglês e entenda cada ajuste.</span><span class="feature-link">Corrigir frase <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
+                <button class="feature-card" data-view="translate" type="button"><b><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h12M9 3v2M6 5c1 5 4 8 8 10M13 5c-1 5-5 9-10 11M14 21l4-10 4 10M15.5 17h5"/></svg></b><strong>Tradução</strong><span>Encontre a palavra certa entre português e inglês.</span><span class="feature-link">Traduzir texto <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></span></button>
               </div>
+              <section id="home-progress-card" class="home-progress-section" aria-labelledby="home-progress-title" aria-busy="false">
+                <div class="section-heading"><div><h2 id="home-progress-title">Seu progresso</h2><span class="muted">Uma visão do que você já praticou</span></div><button id="home-progress-action" class="text-button" type="button" data-view="progress">Ver progresso <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></div>
+                <div id="home-progress-loading" class="home-card-loading" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando seu progresso...</span></div>
+                <div id="home-progress-content" class="home-progress-grid" hidden><article class="card home-progress-metric"><strong id="home-progress-conversations" class="progress-value"></strong><span class="progress-label">Conversas avaliadas</span></article><article class="card home-progress-metric"><strong id="home-progress-readings" class="progress-value"></strong><span class="progress-label">Leituras concluídas</span></article><article class="card home-progress-metric"><strong id="home-progress-words" class="progress-value"></strong><span class="progress-label">Palavras encontradas</span></article></div>
+                <p id="home-progress-status" class="home-card-status" role="status" aria-live="polite"></p>
+              </section>
+            </section>
+
+            <section id="view-practice" class="page-view" hidden>
+              <div class="practice-header"><div><span class="eyebrow">PRÁTICA</span><h1>Praticar inglês</h1><p>Escolha uma atividade e continue evoluindo no seu ritmo.</p></div><aside class="practice-motivation card"><span class="practice-motivation-icon" aria-hidden="true">◎</span><div><strong>Pequenos passos, grandes conquistas!</strong><p>Pratique um pouco todos os dias e veja seu progresso.</p></div></aside></div>
+              <section class="practice-hero card"><div class="practice-hero-content"><span class="practice-badge">ATIVIDADE PRINCIPAL</span><h2>Conversação</h2><p>Pratique situações reais com seu tutor de IA.<br class="practice-hero-break"> Melhore sua fluência, vocabulário e confiança.</p><button class="primary practice-action" type="button" data-view="scenarios">Começar conversa <span aria-hidden="true">→</span></button><div class="practice-benefits" aria-label="Benefícios da conversação"><span><i aria-hidden="true">●</i><b>Diálogos realistas</b><small>Do seu nível</small></span><span><i aria-hidden="true">▥</i><b>Feedback instantâneo</b><small>Em vários aspectos</small></span><span><i aria-hidden="true">ϟ</i><b>Mais confiança</b><small>Para o mundo real</small></span></div></div><div class="practice-hero-visual" aria-hidden="true"><img class="practice-hero-character" src="assets/praticar-avatar.png" alt="" width="1536" height="1024"></div></section>
+              <div class="practice-section-heading"><div><h2>Outras formas de praticar</h2><p>Explore diferentes atividades e desenvolva todas as suas habilidades no inglês.</p></div></div>
+              <div class="practice-grid" aria-label="Atividades de prática"><button class="practice-activity-card practice-activity-reading card" data-view="reading" type="button"><span class="practice-activity-heading"><span class="practice-activity-icon" aria-hidden="true">▱</span><strong>Leitura</strong></span><span class="practice-activity-description">Pratique compreensão com textos adaptados ao seu nível.</span><span class="practice-link">Praticar leitura <span aria-hidden="true">→</span></span></button><button class="practice-activity-card practice-activity-vocabulary card" data-view="vocabulary" type="button"><span class="practice-activity-heading"><span class="practice-activity-icon" aria-hidden="true">◎</span><strong>Vocabulário</strong></span><span class="practice-activity-description">Aprenda novas palavras e revise o que já estudou.</span><span class="practice-link">Praticar vocabulário <span aria-hidden="true">→</span></span></button><button class="practice-activity-card practice-activity-correction card" data-view="correct" type="button"><span class="practice-activity-heading"><span class="practice-activity-icon" aria-hidden="true">✓</span><strong>Correção</strong></span><span class="practice-activity-description">Melhore suas frases e entenda seus erros com feedback da IA.</span><span class="practice-link">Corrigir frase <span aria-hidden="true">→</span></span></button><button class="practice-activity-card practice-activity-translation card" data-view="translate" type="button"><span class="practice-activity-heading"><span class="practice-activity-icon" aria-hidden="true">文</span><strong>Tradução</strong></span><span class="practice-activity-description">Traduza entre português e inglês com contexto e exemplos.</span><span class="practice-link">Traduzir texto <span aria-hidden="true">→</span></span></button></div>
+              <section class="practice-footer-banner card"><span class="practice-footer-icon" aria-hidden="true">🚀</span><div><strong>Quanto mais você pratica, mais longe chega!</strong><p>Escolha uma atividade, dedique alguns minutos e veja a diferença no seu inglês.</p></div><button class="text-button" type="button" data-view="progress">Ver meu progresso <span aria-hidden="true">→</span></button></section>
             </section>
 
             <section id="view-chat" class="page-view" hidden>
               <div class="chat-page-heading"><h1>Conversar</h1></div>
-              <div class="chat-card card"><div id="chat-assistant" class="chat-assistant" hidden><span id="chat-assistant-avatar-slot" class="chat-assistant-avatar-slot"></span><div><strong id="chat-assistant-name"></strong><span id="chat-assistant-description" class="muted"></span></div></div>
+              <div class="chat-card card"><div id="chat-assistant" class="chat-assistant" hidden><div class="chat-assistant-identity"><span id="chat-assistant-avatar-slot" class="chat-assistant-avatar-slot"></span><div><strong id="chat-assistant-name"></strong><span id="chat-assistant-description" class="muted"></span></div></div><section id="conversation-progress" class="conversation-progress" aria-labelledby="conversation-progress-title"><div class="conversation-progress-heading"><strong id="conversation-progress-title">Progresso da conversa</strong><span id="conversation-progress-complete" class="conversation-progress-complete" aria-hidden="true" hidden>✓</span></div><div id="conversation-progress-bar" class="conversation-progress-bar" role="progressbar" aria-label="Progresso da conversa" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Continue conversando para concluir esta atividade."><span id="conversation-progress-fill" class="conversation-progress-fill"></span></div><p id="conversation-progress-text">Continue conversando para concluir esta atividade.</p></section></div>
                 <div class="chat-toolbar">
                   <button id="complete-conversation" class="secondary" type="button">Encerrar conversa</button>
                   <label for="chat-language" class="chat-language-label">Idioma<select id="chat-language"><option value="en">English</option><option value="pt">Português</option></select></label>
@@ -139,14 +199,22 @@
             </section>
 
             <section id="view-reading" class="page-view" hidden>
-              <div class="page-heading"><h1>Leitura</h1><p>Pratique sua compreensão com textos adaptados ao seu nível.</p></div>
+              <div class="page-heading reading-page-heading"><h1>Leitura</h1><p>Pratique sua compreensão com textos adaptados ao seu nível.</p></div>
               <div class="card reading-card">
-                <section id="reading-setup" aria-label="Configurar leitura">
-                <div id="reading-difficulty"></div>
-                <label for="reading-topic">Tema</label>
-                <select id="reading-topic"><option value="DAILY_LIFE">Cotidiano</option><option value="TRAVEL">Viagem</option><option value="WORK">Trabalho</option><option value="TECHNOLOGY">Tecnologia</option><option value="CULTURE">Cultura</option><option value="RANDOM">Aleatório</option></select>
-                <button id="reading-generate" class="primary" type="button">Gerar texto</button>
-                <p id="reading-status" class="message" role="status" aria-live="polite"></p>
+                <section id="reading-setup" class="reading-setup" aria-label="Configurar leitura">
+                  <div class="reading-setup-step reading-level-step">
+                    <div class="reading-step-heading"><span class="reading-step-number" aria-hidden="true">1</span><div><h2 id="reading-level-heading">Escolha seu nível</h2><p>Selecione a dificuldade dos textos de leitura.</p></div></div>
+                    <div id="reading-difficulty"></div>
+                  </div>
+                  <div class="reading-setup-step reading-topic-step">
+                    <div class="reading-step-heading"><span class="reading-step-number" aria-hidden="true">2</span><div><h2 id="reading-topic-heading">Escolha um tema</h2><p>Selecione o assunto que mais te interessa.</p></div></div>
+                    <div class="reading-topic-actions">
+                      <div class="reading-topic-control"><span class="reading-topic-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><label class="visually-hidden" for="reading-topic">Tema da leitura</label><select id="reading-topic"><option value="DAILY_LIFE">Cotidiano</option><option value="TRAVEL">Viagem</option><option value="WORK">Trabalho</option><option value="TECHNOLOGY">Tecnologia</option><option value="CULTURE">Cultura</option><option value="RANDOM">Aleatório</option></select><span class="reading-topic-chevron" aria-hidden="true">⌄</span></div>
+                      <div class="reading-generate-area"><button id="reading-generate" class="primary" type="button">Gerar leitura</button><p>Vamos criar um texto especial para você.</p></div>
+                    </div>
+                  </div>
+                  <p id="reading-status" class="message" role="status" aria-live="polite"></p>
+                  <aside class="reading-tip" aria-label="Dica de leitura"><span class="reading-tip-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M9 18h6M10 22h4M8.4 14.4A6 6 0 1 1 15.6 14.4c-.7.6-1.1 1.3-1.2 2.1h-4.8c-.1-.8-.5-1.5-1.2-2.1Z"/></svg></span><div><strong>Dica</strong><p>Leia no seu ritmo, marque palavras novas e pratique depois com o vocabulário.</p></div></aside>
                 </section>
                 <section id="reading-result" hidden aria-label="Texto de leitura">
                   <button id="reading-back" class="secondary reading-back" type="button">Escolher outro texto</button>
@@ -187,46 +255,105 @@
                 <section id="vocabulary-completion" class="vocabulary-completion" hidden aria-label="Lição concluída"><span class="vocabulary-completion-mark" aria-hidden="true">✓</span><h3>Vocabulário de hoje concluído!</h3><div class="vocabulary-completion-summary"><span id="vocabulary-completion-quiz"></span><span id="vocabulary-completion-words"></span><span id="vocabulary-completion-writing"></span></div><p>Volte amanhã para continuar aumentando seu vocabulário.</p><button id="vocabulary-review-button" class="secondary small-action" type="button">Revisar palavras</button></section>
               </div>
             </section>
-            <section id="view-scenarios" class="page-view" hidden><div class="page-heading"><h1>Cenários</h1></div><div id="scenario-loading" class="loading-indicator" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando cenários...</span></div><div id="scenario-list" class="feature-grid"></div><p id="scenario-status" class="message" role="status"></p></section>
-            <section id="view-conversations" class="page-view" hidden><div class="page-heading"><h1>Conversas</h1></div><div id="conversation-loading" class="loading-indicator" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando conversas...</span></div><div id="conversation-list" class="feature-grid"></div><p id="conversation-status" class="message" role="status"></p></section>
-            <section id="view-profile" class="page-view" hidden>
-              <div class="page-heading"><div><span class="eyebrow">SEU PERFIL</span><h1>Perfil</h1><p class="muted">Personalize sua experiência de aprendizado.</p></div></div>
+            <section id="view-scenarios" class="page-view scenarios-view" hidden>
+              <div class="scenarios-page-heading">
+                <div>
+                  <span class="eyebrow">CONVERSA</span>
+                  <h1>Nova conversa</h1>
+                  <p>Escolha um cenário, defina suas preferências e comece a praticar.</p>
+                </div>
+                <aside class="scenarios-intro-card" aria-label="Prática com tutores de IA">
+                  <span class="scenarios-intro-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M7 16.5 4 20v-4.5A7.5 7.5 0 1 1 19.5 12"/><path d="M9 10h6M9 13h3"/></svg></span>
+                  <p>Converse com tutores de IA<br><strong>em situações do mundo real.</strong></p>
+                </aside>
+              </div>
+              <div id="scenario-loading" class="loading-indicator" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando cenários...</span></div>
+              <div id="scenario-list" class="feature-grid scenario-grid"></div>
+              <aside class="scenarios-tip" aria-label="Dica para conversar">
+                <span class="scenarios-tip-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M9 18h6M10 22h4M8.4 14.4A6 6 0 1 1 15.6 14.4c-.7.6-1.1 1.3-1.2 2.1h-4.8c-.1-.8-.5-1.5-1.2-2.1Z"/></svg></span>
+                <div><strong>Dica</strong><p>Não se preocupe em ser perfeito. O importante é praticar e se comunicar cada vez mais!</p></div>
+              </aside>
+              <p id="scenario-status" class="message" role="status"></p>
+            </section>
+            <section id="view-conversations" class="page-view conversations-view" hidden>
+              <section class="conversations-hero card" aria-labelledby="conversations-title">
+                <div class="conversations-hero-content"><span class="eyebrow">CONVERSAS</span><h1 id="conversations-title">Minhas conversas</h1><p>Revise suas conversas, acompanhe sua evolução e continue praticando.</p><div class="conversations-metrics" aria-label="Resumo das conversas"><span><strong id="conversation-total">—</strong><small>Total de conversas</small></span><span><strong id="conversation-completed">—</strong><small>Concluídas</small></span><span><strong id="conversation-active">—</strong><small>Em andamento</small></span></div></div>
+                <div class="conversations-hero-art" aria-hidden="true"><img src="assets/conversas-hero.png" alt="" width="1254" height="1254" decoding="async"></div>
+              </section>
+              <div class="conversations-toolbar">
+                <div class="conversation-filter-group" role="group" aria-label="Filtrar conversas"><button id="conversation-filter-all" class="conversation-filter active" type="button" data-conversation-filter="all" aria-pressed="true">Todas</button><button id="conversation-filter-active" class="conversation-filter" type="button" data-conversation-filter="active" aria-pressed="false">Em andamento</button><button id="conversation-filter-completed" class="conversation-filter" type="button" data-conversation-filter="completed" aria-pressed="false">Concluídas</button></div>
+                <label class="conversation-search" for="conversation-search"><span class="visually-hidden">Buscar conversa</span><span aria-hidden="true">⌕</span><input id="conversation-search" type="search" placeholder="Buscar conversa..." autocomplete="off"></label>
+              </div>
+              <div id="conversation-loading" class="loading-indicator" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando conversas...</span></div>
+              <div id="conversation-list" class="conversation-history-list" role="list" hidden></div>
+              <section id="conversation-footer-banner" class="conversation-footer-banner card" hidden><div><strong>Continue conversando e evolua ainda mais</strong><p>Pratique regularmente e acompanhe sua evolução no Meu Progresso.</p></div><div><button class="secondary" type="button" data-view="scenarios">Nova conversa <span aria-hidden="true">→</span></button><button class="text-button" type="button" data-view="progress">Ver meu progresso <span aria-hidden="true">→</span></button></div></section>
+              <p id="conversation-status" class="message" role="status" aria-live="polite"></p>
+            </section>
+            <section id="view-profile" class="page-view profile-view" hidden>
+              <div class="profile-page-heading">
+                <div id="profile-summary-heading"><span class="eyebrow">PERFIL</span><h1>Perfil</h1><p>Suas informações e preferências no EnglishAI.</p></div>
+                <div id="profile-edit-heading" hidden><span class="eyebrow">PERFIL</span><h1>Editar perfil</h1><p>Atualize suas informações e preferências.</p></div>
+              </div>
               <p id="profile-status" class="message" role="status" aria-live="polite"></p>
               <div id="profile-loading" class="loading-indicator" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando perfil...</span></div>
-              <div id="profile-summary" class="profile-card card">
-                <div class="profile-summary-avatar"><span id="profile-avatar-slot" class="profile-avatar" aria-hidden="true"></span><div><h2 id="profile-summary-name"></h2><p id="profile-onboarding" class="muted"></p></div></div>
-                <dl class="profile-details"><dt>Idade</dt><dd id="profile-summary-age"></dd><dt>Nível de inglês</dt><dd id="profile-summary-level"></dd><dt>Objetivo</dt><dd id="profile-summary-goal"></dd></dl>
-                <button id="profile-edit-button" class="secondary" type="button">Editar perfil</button>
+              <div id="profile-summary">
+                <div class="profile-dashboard-grid">
+                  <div class="profile-dashboard-main">
+                    <section class="profile-identity-card card" aria-label="Identidade do perfil">
+                      <span id="profile-avatar-slot" class="profile-main-avatar" aria-hidden="true"></span>
+                      <div><h2 id="profile-summary-name"></h2><p id="profile-summary-username"></p><p id="profile-member-since" class="profile-member-since" hidden></p><p id="profile-onboarding" class="profile-identity-note"></p></div>
+                    </section>
+                    <section class="profile-information-card card" aria-labelledby="profile-information-title">
+                      <h2 id="profile-information-title">Informações pessoais</h2>
+                      <dl class="profile-information-list">
+                        <div><dt><span aria-hidden="true">♙</span>Nome</dt><dd id="profile-information-name"></dd></div>
+                        <div><dt><span aria-hidden="true">✉</span>E-mail</dt><dd id="profile-email"></dd></div>
+                        <div id="profile-email-verified-row" hidden><dt><span aria-hidden="true">✓</span>E-mail confirmado</dt><dd id="profile-email-verified"></dd></div>
+                        <div><dt><span aria-hidden="true">▣</span>Data de nascimento</dt><dd id="profile-summary-birth-date"></dd></div>
+                        <div><dt><span aria-hidden="true">▥</span>Nível de inglês</dt><dd id="profile-summary-level"></dd></div>
+                        <div><dt><span aria-hidden="true">◎</span>Objetivo</dt><dd id="profile-summary-goal"></dd></div>
+                      </dl>
+                      <div class="profile-information-action"><button id="profile-edit-button" class="secondary" type="button">Editar perfil</button></div>
+                    </section>
+                  </div>
+                  <aside class="profile-side-cards" aria-label="Resumo do perfil">
+                    <section class="profile-side-card card"><span class="profile-side-icon is-level" aria-hidden="true">▥</span><div><p>Seu nível atual</p><strong id="profile-side-level"></strong><small>Seu nível ajuda a adaptar as práticas.</small></div></section>
+                    <section class="profile-side-card card"><span class="profile-side-icon is-goal" aria-hidden="true">◎</span><div><p>Seu objetivo</p><strong id="profile-side-goal"></strong><small>Pratique no ritmo que faz sentido para você.</small></div></section>
+                    <section class="profile-tip-card"><span aria-hidden="true">♧</span><div><strong>Dica</strong><p>Mantenha seu perfil atualizado para receber recomendações mais personalizadas.</p></div></section>
+                  </aside>
+                </div>
+                <aside class="profile-continue-card"><span aria-hidden="true">↗</span><div><strong>Continue evoluindo!</strong><p>Explore os recursos do EnglishAI e pratique um pouco todos os dias.</p></div></aside>
               </div>
-              <div id="profile-edit-panel" class="profile-card card" hidden>
-                <form id="profile-form">
+              <div id="profile-edit-panel" hidden>
+                <form id="profile-form" class="profile-edit-layout">
+                  <section class="profile-edit-main card">
+                    <h2>Informações pessoais</h2>
                   <div class="profile-form-fields">
                     <div class="profile-field"><label for="profile-name">Nome</label><input id="profile-name" type="text" maxlength="100" autocomplete="name"></div>
-                    <div class="profile-field"><label for="profile-age">Idade</label><input id="profile-age" type="number" min="13" max="120" inputmode="numeric"></div>
-                    <div class="profile-field"><label for="profile-level">Nível de inglês</label><select id="profile-level"><option value="">Selecione seu nível</option><option value="A1">A1 — Iniciante</option><option value="A2">A2 — Básico</option><option value="B1">B1 — Intermediário</option><option value="B2">B2 — Intermediário superior</option><option value="C1">C1 — Avançado</option><option value="C2">C2 — Proficiente</option></select><small class="field-hint">O nível de inglês ajuda o EnglishAI a sugerir a dificuldade ideal para suas novas conversas. Você ainda poderá escolher qualquer dificuldade.</small></div>
+                    <div class="profile-field"><label for="profile-birth-date">Data de nascimento</label><input id="profile-birth-date" type="date" autocomplete="bday"></div>
+                    <div class="profile-field"><label for="profile-level">Nível de inglês</label><select id="profile-level"><option value="">Não sei meu nível</option><option value="A1">A1 — Iniciante</option><option value="A2">A2 — Básico</option><option value="B1">B1 — Intermediário</option><option value="B2">B2 — Intermediário superior</option><option value="C1">C1 — Avançado</option><option value="C2">C2 — Proficiente</option></select><small class="field-hint">Você poderá fazer um teste de nivelamento futuramente. Por enquanto, pode continuar sem escolher um nível.</small></div>
                     <div class="profile-field"><label for="profile-goal">Objetivo</label><select id="profile-goal"><option value="">Selecione seu objetivo</option><option value="GENERAL">Geral</option><option value="CONVERSATION">Conversação</option><option value="WORK">Trabalho</option><option value="TRAVEL">Viagem</option><option value="STUDY">Estudos</option></select></div>
                   </div>
-                  <fieldset class="avatar-picker"><legend>Escolha seu avatar</legend><div id="avatar-grid" class="avatar-grid"></div></fieldset>
+                  <section class="profile-avatar-editor" aria-labelledby="profile-avatar-editor-title">
+                    <div class="profile-avatar-editor-current"><span id="profile-edit-avatar-slot" class="profile-edit-avatar" aria-hidden="true"></span><div><h3 id="profile-avatar-editor-title">Foto de perfil</h3><p>Escolha a aparência que representa você.</p></div><button id="profile-avatar-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="avatar-picker">Alterar avatar</button></div>
+                    <fieldset id="avatar-picker" class="avatar-picker" hidden><legend>Escolha sua aparência</legend><div id="avatar-grid" class="avatar-grid"></div></fieldset>
+                  </section>
                   <div class="profile-form-actions"><button id="profile-cancel-button" class="secondary" type="button">Cancelar</button><button id="profile-save-button" class="primary" type="submit">Salvar alterações</button></div>
+                  </section>
+                  <aside class="profile-edit-side" aria-label="Resumo das preferências"><section class="profile-edit-tip"><span aria-hidden="true">♧</span><div><strong>Dica</strong><p>Essas informações personalizam conteúdos adequados ao seu nível e objetivo.</p></div></section><section class="profile-edit-journey card"><h2>Sua jornada</h2><p><strong>Nível atual</strong><span id="profile-edit-side-level"></span></p><p><strong>Objetivo</strong><span id="profile-edit-side-goal"></span></p></section></aside>
                 </form>
               </div>
-              <section class="profile-card card profile-account-section" aria-label="Sess&#227;o e conta">
-                <div class="account-heading"><span id="account-avatar-slot" class="profile-avatar" aria-hidden="true"></span><div><h2>Conta</h2><span class="muted">Acesso e sess&#227;o</span></div></div>
-                <dl class="profile-details"><dt>Nome de usu&#225;rio</dt><dd id="account-name"></dd><dt>E-mail</dt><dd id="account-email"></dd><dt>E-mail confirmado</dt><dd id="account-verified"></dd></dl>
-                <button id="account-logout" class="button-danger" type="button">Sair da conta</button>
-              </section>
             </section>
             <section id="view-progress" class="page-view" hidden>
-              <div class="page-heading"><div><span class="eyebrow">SUA JORNADA</span><h1>Meu Progresso</h1><p class="muted">Acompanhe sua evolução no inglês.</p></div></div>
-              <div class="progress-periods" role="group" aria-label="Período"><button class="secondary progress-period active" type="button" data-period="ALL_TIME">Geral</button><button class="secondary progress-period" type="button" data-period="LAST_7_DAYS">7 dias</button><button class="secondary progress-period" type="button" data-period="CURRENT_MONTH">Este mês</button><button class="secondary progress-period" type="button" data-period="LAST_30_DAYS">30 dias</button></div>
+              <div class="progress-heading"><div><span class="eyebrow">SUA JORNADA</span><h1>Meu Progresso</h1><p class="muted">Acompanhe sua evolução e veja onde você pode melhorar.</p></div><div class="progress-periods" role="group" aria-label="Período"><button class="secondary progress-period active" type="button" data-period="ALL_TIME">Geral</button><button class="secondary progress-period" type="button" data-period="LAST_7_DAYS">7 dias</button><button class="secondary progress-period" type="button" data-period="CURRENT_MONTH">Este mês</button><button class="secondary progress-period" type="button" data-period="LAST_30_DAYS">30 dias</button></div></div>
               <p id="progress-status" class="message" role="status" aria-live="polite"></p>
               <div id="progress-loading" class="loading-indicator page-loading" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span>Carregando progresso...</span></div>
               <div id="progress-content" hidden>
-                <div class="progress-overview" aria-label="Resumo"><article class="card progress-card"><strong id="progress-conversations"></strong><span>Conversas no período</span></article><article class="card progress-card"><strong id="progress-readings"></strong><span>Leituras no período</span></article><article class="card progress-card"><strong id="progress-new-words"></strong><span>Novas palavras no período</span></article><article class="card progress-card"><strong id="progress-mastered"></strong><span>Palavras dominadas atualmente</span></article></div>
-                <section class="progress-section card"><h2>Conversação</h2><div class="progress-metrics"><span>Conversas avaliadas <strong id="progress-conversation-count"></strong></span><span>Satisfatórias <strong id="progress-conversation-success"></strong></span><span>Taxa de sucesso <strong id="progress-conversation-rate"></strong></span><span>Média geral <strong id="progress-conversation-average"></strong></span></div><div class="progress-competencies"><span>Comunicação <strong id="progress-communication"></strong></span><span>Gramática <strong id="progress-grammar"></strong></span><span>Vocabulário <strong id="progress-vocabulary"></strong></span><span>Fluência <strong id="progress-fluency"></strong></span></div><h3>Por dificuldade</h3><div id="progress-conversation-difficulty" class="progress-breakdown"></div></section>
-                <section class="progress-section card"><h2>Leitura</h2><div class="progress-metrics"><span>Textos concluídos <strong id="progress-reading-count"></strong></span><span>Compreendidos <strong id="progress-reading-success"></strong></span><span>Taxa de sucesso <strong id="progress-reading-rate"></strong></span><span>Compreensão média <strong id="progress-reading-average"></strong></span></div><h3>Por dificuldade</h3><div id="progress-reading-difficulty" class="progress-breakdown"></div></section>
-                <section class="progress-section card"><h2>Vocabulário</h2><div class="progress-metrics"><span>Total de palavras <strong id="progress-word-count"></strong></span><span>Novas <strong id="progress-word-new"></strong></span><span>Aprendendo <strong id="progress-word-learning"></strong></span><span>Em revisão <strong id="progress-word-reviewing"></strong></span><span>Dominadas <strong id="progress-word-mastered"></strong></span><span>Para revisar hoje <strong id="progress-word-due"></strong></span></div><p id="progress-vocabulary-period" class="muted"></p></section>
-                <section class="progress-section card"><h2>Evolução</h2><div id="progress-timeline" class="progress-timeline"></div></section>
+                <div class="progress-overview" aria-hidden="true" hidden><strong id="progress-conversations"></strong><strong id="progress-readings"></strong><strong id="progress-new-words"></strong><strong id="progress-mastered"></strong></div>
+                <section class="progress-section progress-analytics-card card"><div class="progress-section-heading"><div class="progress-title"><span class="progress-section-icon" aria-hidden="true">◌</span><div><h2>Conversação</h2><p>Veja sua evolução nas conversas com a IA.</p></div></div><button class="progress-detail-action" type="button" data-view="conversations">Ver conversas em detalhes <span aria-hidden="true">→</span></button></div><div class="progress-analytics-body"><div><div class="progress-metrics"><span>Conversas avaliadas <strong id="progress-conversation-count"></strong></span><span>Satisfatórias <strong id="progress-conversation-success"></strong></span><span>Taxa de sucesso <strong id="progress-conversation-rate"></strong></span><span>Média geral <strong id="progress-conversation-average"></strong></span></div><div class="progress-competencies" aria-label="Médias por competência"><span>Comunicação <strong id="progress-communication"></strong></span><span>Gramática <strong id="progress-grammar"></strong></span><span>Vocabulário <strong id="progress-vocabulary"></strong></span><span>Fluência <strong id="progress-fluency"></strong></span></div><div id="progress-conversation-difficulty" class="progress-breakdown" aria-label="Conversas por dificuldade"></div></div><div id="progress-conversation-chart" class="progress-chart" role="img" aria-label="Desempenho nas conversas"></div></div></section>
+                <section class="progress-section progress-analytics-card card"><div class="progress-section-heading"><div class="progress-title"><span class="progress-section-icon" aria-hidden="true">▱</span><div><h2>Leitura</h2><p>Acompanhe sua compreensão nos textos.</p></div></div></div><div class="progress-analytics-body"><div><div class="progress-metrics"><span>Textos concluídos <strong id="progress-reading-count"></strong></span><span>Compreendidos <strong id="progress-reading-success"></strong></span><span>Taxa de sucesso <strong id="progress-reading-rate"></strong></span><span>Compreensão média <strong id="progress-reading-average"></strong></span></div><div id="progress-reading-difficulty" class="progress-breakdown" aria-label="Leituras por dificuldade"></div></div><div id="progress-reading-chart" class="progress-chart" role="img" aria-label="Compreensão por dificuldade"></div></div></section>
+                <section class="progress-section progress-analytics-card card"><div class="progress-section-heading"><div class="progress-title"><span class="progress-section-icon" aria-hidden="true">◎</span><div><h2>Vocabulário</h2><p>Veja seu progresso no aprendizado de palavras.</p></div></div></div><div class="progress-analytics-body"><div><div class="progress-metrics progress-vocabulary-metrics"><span>Total de palavras <strong id="progress-word-count"></strong></span><span>Novas <strong id="progress-word-new"></strong></span><span>Aprendendo <strong id="progress-word-learning"></strong></span><span>Em revisão <strong id="progress-word-reviewing"></strong></span><span>Dominadas <strong id="progress-word-mastered"></strong></span><span>Para revisar hoje <strong id="progress-word-due"></strong></span></div><p id="progress-vocabulary-period" class="muted"></p></div><div id="progress-vocabulary-chart" class="progress-chart" role="img" aria-label="Distribuição do vocabulário"></div></div></section>
+                <section class="progress-section progress-analytics-card progress-evolution-card card"><div class="progress-section-heading"><div class="progress-title"><span class="progress-section-icon" aria-hidden="true">▥</span><div><h2>Evolução</h2><p>Seu progresso geral ao longo do tempo.</p></div></div></div><div id="progress-evolution-chart" class="progress-chart" role="img" aria-label="Atividades ao longo do tempo"></div><div id="progress-timeline" class="progress-timeline" aria-label="Dados mensais da evolução"></div></section>
               </div>
             </section>
           </div>

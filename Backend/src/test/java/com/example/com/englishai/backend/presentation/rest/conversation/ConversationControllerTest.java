@@ -32,10 +32,10 @@ class ConversationControllerTest {
         var owner=UUID.randomUUID();var id=UUID.randomUUID();
         when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
         when(evaluations.complete(owner,id)).thenReturn(new com.example.com.englishai.backend.application.conversation.ConversationEvaluationService.Evaluation(
-            id,com.example.com.englishai.backend.application.conversation.ConversationEvaluationService.Result.INSUFFICIENT,null,null,null,null,4,2L));
+            id,com.example.com.englishai.backend.application.conversation.ConversationEvaluationService.Result.INSUFFICIENT,null,null,null,null,5,2L));
         mvc.perform(post("/api/v1/conversations/"+id+"/complete").header("Authorization","Bearer test-token"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("INSUFFICIENT"))
-            .andExpect(jsonPath("$.minimumUserMessages").value(4)).andExpect(jsonPath("$.scores").doesNotExist());
+            .andExpect(jsonPath("$.minimumUserMessages").value(5)).andExpect(jsonPath("$.scores").doesNotExist());
         verify(evaluations).complete(owner,id);
     }
     @Test void completionRequiresAuthenticationAndOwnership() throws Exception {

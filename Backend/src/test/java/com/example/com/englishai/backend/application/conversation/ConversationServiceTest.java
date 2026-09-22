@@ -9,6 +9,7 @@ import com.example.com.englishai.backend.infrastructure.persistence.repository.*
 import org.junit.jupiter.api.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -36,8 +37,8 @@ class ConversationServiceTest {
         when(definitions.findByScenarioKey("CUSTOM_INTERVIEW")).thenReturn(Optional.of(new ConversationScenarioDefinitionEntity(
                 UUID.randomUUID(), "CUSTOM_INTERVIEW", "Interview", "Professional interview", "Rodrigo", "interviewer_default",
                 "Act as a professional interviewer.", true, 0, now)));
-        when(profileRepository.findById(owner)).thenReturn(Optional.of(new UserProfileEntity(owner, "Learner", 37,
-                EnglishLevel.A2, LearningGoal.WORK, AvatarType.PREDEFINED, "avatar_default", true, now)));
+        when(profileRepository.findById(owner)).thenReturn(Optional.of(new UserProfileEntity(owner, "Learner", LocalDate.of(1988, 1, 1),
+                EnglishLevel.A2, LearningGoal.WORK, AvatarType.PREDEFINED, "avatar_default", OnboardingStatus.PENDING, now)));
         when(conversations.save(any())).thenAnswer(call -> call.getArgument(0));
         when(messages.save(any())).thenAnswer(call -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();

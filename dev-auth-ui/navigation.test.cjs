@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const id = "11111111-1111-4111-8111-111111111111";
 const scenarios = ["RESTAURANT", "JOB_INTERVIEW", "FREE_TALK"].map(key => ({
   id: key, displayName: key, description: "Practice", assistantDisplayName: key === "RESTAURANT" ? "Layla" : "Rodrigo",
@@ -18,12 +19,14 @@ const detail = scenario => ({ conversation: conversation(scenario), messages: [
 const conversationEvaluation = (status = "SUCCESS") => ({ conversationId: id, status,
   scores: { communication: 82, grammar: 74, vocabulary: 78, fluency: 80, relevance: 80, overall: 79 },
   strengths: ["Você manteve o contexto."], improvements: ["Varie os conectores."], evaluatedAt: "2026-09-16T12:00:00Z" });
+const unlockConversationCompletion = ui => ui.run('chatHistory = Array.from({ length: CONVERSATION_MIN_USER_MESSAGES }, () => ({ role: "user", content: "A valid learner response." })); updateConversationProgress(); updateConversationControls();');
 
 for (const mode of ["text", "voice"]) {
   test(`Conversation completion in ${mode} shows persisted scores and blocks new messages`, async () => {
     const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: conversationEvaluation() }
       : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
     await ui.run(`openConversation("${id}")`);
+    await unlockConversationCompletion(ui);
     await ui.run(`$("chat-mode").value = "${mode}"`);
     assert.equal(ui.get("complete-conversation").disabled, false);
     await ui.get("complete-conversation").click();
@@ -45,11 +48,12 @@ for (const mode of ["text", "voice"]) {
 }
 
 test("Insufficient conversation remains active and can continue", async () => {
-  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: { conversationId: id, status: "INSUFFICIENT", minimumUserMessages: 4, currentUserMessages: 2 } }
+  const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: { conversationId: id, status: "INSUFFICIENT", minimumUserMessages: 5, currentUserMessages: 4 } }
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
   await ui.run(`openConversation("${id}")`);
+  await unlockConversationCompletion(ui);
   await ui.get("complete-conversation").click();
-  assert.match(ui.get("conversation-completion-status").textContent, /2 de 4/);
+  assert.equal(ui.get("conversation-completion-status").textContent, "Continue conversando antes de encerrar para avaliarmos seu desempenho.");
   assert.equal(ui.get("conversation-evaluation").hidden, true);
   assert.equal(ui.get("send-chat").disabled, false);
   assert.equal(ui.get("chat-form").hidden, false);
@@ -62,6 +66,7 @@ test("Completion loading prevents duplicate requests and sending while evaluatin
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? new Promise(r => resolve = r)
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
   await ui.run(`openConversation("${id}")`);
+  await unlockConversationCompletion(ui);
   const pending = ui.get("complete-conversation").click();
   assert.equal(ui.get("complete-conversation").textContent, "Avaliando sua conversa...");
   assert.equal(ui.get("send-chat").disabled, true);
@@ -74,7 +79,7 @@ test("NEEDS_PRACTICE remains constructive and feedback is rendered as text", asy
   const result = { ...conversationEvaluation("NEEDS_PRACTICE"), strengths: ["<img src=x onerror=alert(1)>"] };
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: result }
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
-  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  await ui.run(`openConversation("${id}")`); await unlockConversationCompletion(ui); await ui.get("complete-conversation").click();
   assert.match(ui.get("conversation-evaluation").children[1].textContent, /Continue praticando/);
   const item = ui.get("conversation-evaluation").children[5].children[0];
   assert.equal(item.textContent, result.strengths[0]);
@@ -123,6 +128,35 @@ test("Active conversation keeps the composer visible after the layout change", a
   assert.equal(ui.get("conversation-evaluation").hidden, true);
 });
 
+test("Conversation progress uses only valid USER messages without exposing counts", async () => {
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("conversation-progress").hidden, false);
+  assert.equal(ui.get("conversation-progress-bar").getAttribute("aria-valuenow"), "20");
+  assert.equal(ui.get("complete-conversation").disabled, true);
+  assert.equal(ui.get("conversation-progress-text").textContent, "Continue conversando para concluir esta atividade.");
+  await ui.run('chatHistory.push({ role: "assistant", content: "A reply with letters." }, { role: "user", content: "123..." }); updateConversationProgress(); updateConversationControls();');
+  assert.equal(ui.get("conversation-progress-bar").getAttribute("aria-valuenow"), "20");
+  await ui.run('chatHistory.push(...Array.from({ length: 4 }, () => ({ role: "user", content: "Another valid response." }))); updateConversationProgress(); updateConversationControls();');
+  assert.equal(ui.get("conversation-progress-bar").getAttribute("aria-valuenow"), "100");
+  assert.equal(ui.get("conversation-progress-complete").hidden, false);
+  assert.equal(ui.get("complete-conversation").disabled, false);
+  assert.equal(ui.get("conversation-progress-text").textContent, "Você já pode concluir esta conversa.");
+  assert.doesNotMatch(ui.get("conversation-progress-text").textContent, /\d|%|faltam/i);
+});
+
+test("Conversation progress is rebuilt from persisted history and stays hidden for completed conversations", async () => {
+  const stored = detail("RESTAURANT");
+  stored.messages = [{ role: "ASSISTANT", content: "Welcome." }, ...Array.from({ length: 3 }, () => ({ role: "USER", content: "A persisted response." }))];
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("conversation-progress-bar").getAttribute("aria-valuenow"), "60");
+  assert.equal(ui.get("complete-conversation").disabled, true);
+  stored.conversation.endedAt = conversationEvaluation().evaluatedAt;
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("conversation-progress").hidden, true);
+});
+
 test("Ended conversation keeps evaluation and its scores visible above the fold", async () => {
   const stored = detail("RESTAURANT"); stored.conversation.endedAt = conversationEvaluation().evaluatedAt; stored.evaluation = conversationEvaluation();
   const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
@@ -158,6 +192,9 @@ test("Conversation messages keep a viewport-based internal scroll region", async
   assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /#view-chat \.chat-card[^}]*min-height:\s*0/);
   assert.equal(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8").includes(".chat-messages { min-height: clamp"), false);
   assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.conversation-evaluation[^}]*max-height:\s*min\(/);
+  assert.match(html, /id="conversation-progress-bar"[^>]*role="progressbar"/);
+  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.chat-assistant \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(270px, \.72fr\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /@media \(max-width: 560px\)[\s\S]*\.chat-bubble, \.user \.chat-bubble \{ margin-inline: 0;/);
 });
 
 test("Login hero uses the provided photo and no longer includes the decorative chat card", () => {
@@ -172,10 +209,235 @@ test("Login hero uses the provided photo and no longer includes the decorative c
   assert.match(styles, /\.brand-panel[^}]*background-size:\s*cover/);
   assert.match(styles, /\.brand-panel[^}]*background-position:\s*58%\s+center/);
   assert.doesNotMatch(styles, /\.brand-panel::before\s*\{/);
-  assert.doesNotMatch(styles, /\.brand-story::before[^}]*radial-gradient/);
+  assert.match(styles, /\.brand-story::before[^}]*radial-gradient/);
   assert.match(styles, /\.brand-story[^}]*max-width:\s*290px/);
   assert.match(styles, /\.brand-message[^}]*font-size:\s*1\.15rem/);
   assert.doesNotMatch(styles, /\.auth-preview\s*\{/);
+});
+
+test("Registration view switches from login and back without retaining messages", async () => {
+  const ui = await app();
+  await ui.get("show-register").click();
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("register-card").hidden, false);
+  assert.equal(ui.get("skip-link").getAttribute("href"), "#register-form");
+  await ui.get("show-login").click();
+  assert.equal(ui.get("login-card").hidden, false);
+  assert.equal(ui.get("register-card").hidden, true);
+  assert.equal(ui.get("register-message").textContent, "");
+  assert.equal(ui.get("skip-link").getAttribute("href"), "#login-form");
+});
+
+test("The rendered Cadastre-se button keeps registration open while initial session restoration finishes", async () => {
+  let resolveCurrentUser;
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/users/me"
+    ? new Promise(resolve => { resolveCurrentUser = resolve; }) : null });
+  await ui.get("show-register").click();
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("register-card").hidden, false);
+  resolveCurrentUser({ status: 401 });
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("register-card").hidden, false);
+  assert.equal(ui.get("register-username").id, "register-username");
+});
+
+test("Verified local login continues to Home", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/login"
+    ? { body: { accessToken: "access", refreshToken: "refresh" } } : null });
+  ui.get("email").value = "learner@example.com"; ui.get("password").value = "secret1";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  assert.equal(ui.get("login-view").hidden, true);
+  assert.equal(ui.get("app-view").hidden, false);
+  assert.equal(ui.state().currentView, "home");
+});
+
+test("Invalid local credentials keep the Login view", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/login" ? { status: 401 } : null });
+  ui.get("email").value = "learner@example.com"; ui.get("password").value = "wrong";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  assert.equal(ui.get("login-card").hidden, false);
+  assert.equal(ui.get("verification-card").hidden, true);
+  assert.equal(ui.get("message").textContent, "Email ou senha inválidos.");
+});
+
+test("Unverified local login opens the shared verification view without retaining the password", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/login"
+    ? { status: 403, body: { message: "Email verification required" } } : null });
+  ui.get("email").value = "learner@example.com"; ui.get("password").value = "secret1";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("verification-card").hidden, false);
+  assert.equal(ui.get("verification-email").textContent, "le***@example.com");
+  assert.equal(ui.get("password").value, "");
+  assert.equal(ui.run("pendingVerificationEmail"), "learner@example.com");
+  assert.equal(ui.get("resend-verification").disabled, false);
+  assert.equal(ui.storage.has("englishai_access_token"), false);
+  assert.equal(ui.storage.has("englishai_refresh_token"), false);
+});
+
+test("Unverified login can return, retry, resend, and confirm through the shared verification flow", async () => {
+  const ui = await app({ handle: request => {
+    if (request.path === "/api/v1/auth/login") return { status: 403 };
+    if (request.path === "/api/v1/auth/resend-verification") return { status: 204 };
+    if (request.path === "/api/v1/auth/verify-email") return { status: 204 };
+    return null;
+  }});
+  ui.get("email").value = "learner@example.com"; ui.get("password").value = "secret1";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  await ui.get("verification-back-login").click();
+  assert.equal(ui.get("verification-card").hidden, true);
+  ui.get("password").value = "secret1";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  await ui.get("resend-verification").click();
+  assert.deepEqual(ui.calls.find(request => request.path === "/api/v1/auth/resend-verification").body, { email: "learner@example.com" });
+  assert.equal(ui.get("resend-verification").textContent, "Reenviar código em 60s");
+  ui.get("verification-code").value = "123456";
+  await ui.run('verifyEmail({ preventDefault() {}, submitter: document.createElement("button") })');
+  assert.equal(ui.get("verification-card").hidden, true);
+  assert.equal(ui.get("login-card").hidden, false);
+  assert.match(ui.get("message").textContent, /E-mail confirmado/);
+  assert.equal(ui.get("verification-code").value, "");
+  assert.equal(ui.run("pendingVerificationEmail"), "");
+});
+
+test("Unverified login handles expired codes and server resend limits without parsing messages", async () => {
+  const ui = await app({ handle: request => {
+    if (request.path === "/api/v1/auth/login") return { status: 403, body: { message: "different text" } };
+    if (request.path === "/api/v1/auth/verify-email") return { status: 400, body: { message: "different text" } };
+    if (request.path === "/api/v1/auth/resend-verification") return { status: 429, body: { message: "different text" } };
+    return null;
+  }});
+  ui.get("email").value = "learner@example.com"; ui.get("password").value = "secret1";
+  await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
+  ui.get("verification-code").value = "123456";
+  await ui.run('verifyEmail({ preventDefault() {}, submitter: document.createElement("button") })');
+  assert.equal(ui.get("verification-message").textContent, "Código incorreto ou expirado.");
+  await ui.get("resend-verification").click();
+  assert.equal(ui.get("verification-message").textContent, "Muitas tentativas. Aguarde antes de tentar novamente.");
+  assert.equal(ui.get("verification-card").hidden, false);
+});
+
+test("Registration validates the minimum fields and matching password locally", async () => {
+  const ui = await app(); await ui.get("show-register").click();
+  await ui.run('registerLocal({ preventDefault() {} })');
+  assert.match(ui.get("register-message").textContent, /nome de usuário/);
+  ui.get("register-username").value = "learner";
+  ui.get("register-email").value = "learner@example.com";
+  ui.get("register-password").value = "secret1";
+  ui.get("register-password-confirm").value = "different";
+  await ui.run('registerLocal({ preventDefault() {} })');
+  assert.equal(ui.get("register-message").textContent, "As senhas não coincidem.");
+  assert.equal(ui.calls.some(request => request.path === "/api/v1/auth/register"), false);
+});
+
+test("Valid registration sends only the backend contract and opens email verification", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 201, body: { id: "new-user", email: "learner@example.com", username: "learner" } } : null });
+  await ui.get("show-register").click();
+  ui.get("register-username").value = "learner";
+  ui.get("register-email").value = "learner@example.com";
+  ui.get("register-password").value = "secret1";
+  ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })');
+  const request = ui.calls.find(item => item.path === "/api/v1/auth/register");
+  assert.deepEqual(request.body, { email: "learner@example.com", username: "learner", password: "secret1" });
+  assert.equal(request.body.confirmPassword, undefined);
+  assert.equal(ui.get("register-card").hidden, true);
+  assert.equal(ui.get("verification-card").hidden, false);
+  assert.equal(ui.get("verification-email").textContent, "le***@example.com");
+  assert.equal(ui.get("resend-verification").textContent, "Reenviar código em 60s");
+  assert.equal(ui.storage.has("englishai_access_token"), false);
+  assert.equal(ui.storage.has("englishai_refresh_token"), false);
+  await ui.run('stopVerificationTimer()');
+});
+
+test("Registration prevents duplicate submissions and restores the button after failure", async () => {
+  let resolve; const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? new Promise(r => resolve = r) : null });
+  await ui.get("show-register").click();
+  ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com";
+  ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  const pending = ui.run('registerLocal({ preventDefault() {} })');
+  assert.equal(ui.get("register-submit").disabled, true);
+  await ui.run('registerLocal({ preventDefault() {} })');
+  assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/register").length, 1);
+  resolve({ status: 500, body: { message: "internal" } }); await pending;
+  assert.equal(ui.get("register-submit").disabled, false);
+  assert.equal(ui.get("register-submit").textContent, "Criar conta");
+  assert.match(ui.get("register-message").textContent, /Não foi possível criar/);
+});
+
+test("Registration maps duplicate email and username errors without exposing internals", async () => {
+  for (const [message, expected] of [["Email already exists", "Este e-mail já está em uso."], ["Username already exists", "Este nome de usuário já está em uso."]]) {
+    const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 409, body: { message } } : null });
+    await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+    await ui.run('registerLocal({ preventDefault() {} })');
+    assert.equal(ui.get("register-message").textContent, expected);
+    assert.equal(ui.get("register-message").textContent.includes(message), false);
+  }
+});
+
+test("Registration reports a connection failure without changing the auth view", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? Promise.reject(new Error("network")) : null });
+  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })');
+  assert.equal(ui.get("register-card").hidden, false);
+  assert.match(ui.get("register-message").textContent, /Não foi possível conectar/);
+});
+
+test("Email verification submits six digits and returns to login on success", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 201 } : request.path === "/api/v1/auth/verify-email" ? { status: 204 } : null });
+  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456";
+  await ui.run('verifyEmail({ preventDefault() {} })');
+  const request = ui.calls.find(item => item.path === "/api/v1/auth/verify-email");
+  assert.deepEqual(request.body, { email: "learner@example.com", code: "123456" });
+  assert.equal(ui.get("login-card").hidden, false); assert.equal(ui.get("verification-card").hidden, true);
+  assert.match(ui.get("message").textContent, /E-mail confirmado/); assert.equal(ui.run("pendingVerificationEmail"), "");
+});
+
+test("Email verification rejects empty or invalid codes without a request", async () => {
+  const ui = await app(); await ui.get("show-register").click();
+  ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })');
+  await ui.run('verifyEmail({ preventDefault() {} })');
+  assert.equal(ui.get("verification-message").textContent, "Informe um código de 6 dígitos.");
+  ui.get("verification-code").value = "12ab56"; await ui.run('verifyEmail({ preventDefault() {} })');
+  assert.equal(ui.calls.some(request => request.path === "/api/v1/auth/verify-email"), false);
+  await ui.run('showAuthMode("login")');
+});
+
+test("Invalid or expired verification code keeps the screen and shows a safe error", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/verify-email" ? { status: 400, body: { message: "Invalid or expired verification code" } } : null });
+  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456"; await ui.run('verifyEmail({ preventDefault() {} })');
+  assert.equal(ui.get("verification-card").hidden, false); assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("verification-message").textContent, "Código incorreto ou expirado."); await ui.run('showAuthMode("login")');
+});
+
+test("Verification loading prevents duplicate submissions", async () => {
+  let resolve; const ui = await app({ handle: request => request.path === "/api/v1/auth/verify-email" ? new Promise(r => resolve = r) : null });
+  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456";
+  const pending = ui.run('verifyEmail({ preventDefault() {} })'); assert.equal(ui.get("verification-submit").disabled, true);
+  await ui.run('verifyEmail({ preventDefault() {} })'); assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/verify-email").length, 1);
+  resolve({ status: 204 }); await pending;
+});
+
+test("Verification resend observes the 60 second cooldown and restarts it after success", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/resend-verification" ? { status: 204 } : null });
+  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })'); await ui.get("resend-verification").click();
+  assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/resend-verification").length, 0);
+  await ui.run('verificationCooldownEnd = Date.now() - 1; updateVerificationCooldown()'); assert.equal(ui.get("resend-verification").disabled, false);
+  await ui.get("resend-verification").click();
+  assert.deepEqual(ui.calls.find(request => request.path === "/api/v1/auth/resend-verification").body, { email: "learner@example.com" });
+  assert.equal(ui.get("resend-verification").textContent, "Reenviar código em 60s"); await ui.run('stopVerificationTimer()');
+});
+
+test("Leaving verification clears the code, email and timer", async () => {
+  const ui = await app(); await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456"; await ui.get("verification-back-login").click();
+  assert.equal(ui.get("verification-code").value, ""); assert.equal(ui.run("pendingVerificationEmail"), ""); assert.equal(ui.run("verificationTimer"), null);
 });
 
 test("Historical evaluation without relevance renders a dash", async () => {
@@ -190,7 +452,7 @@ test("Failed evaluation keeps session and history and permits retry", async () =
   let attempts = 0;
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? ++attempts === 1 ? { status: 503 } : { body: conversationEvaluation() }
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
-  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  await ui.run(`openConversation("${id}")`); await unlockConversationCompletion(ui); await ui.get("complete-conversation").click();
   assert.equal(ui.state().currentUser.id, "owner");
   assert.equal(ui.get("chat-messages").children.length, 2);
   assert.equal(ui.get("send-chat").disabled, false);
@@ -202,6 +464,7 @@ test("Failed evaluation keeps session and history and permits retry", async () =
 test("Pending stream or recording blocks completion without cancelling the turn", async () => {
   const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
   await ui.run(`openConversation("${id}")`);
+  await unlockConversationCompletion(ui);
   for (const state of ['activeChat = { controller: new AbortController() }', 'activeChat = null; recordingOperation = { kind: "chat" }']) {
     await ui.run(state + '; updateConversationControls()');
     assert.equal(ui.get("complete-conversation").disabled, true);
@@ -215,6 +478,7 @@ test("Logout and another account discard pending evaluation and old result", asy
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? new Promise(r => resolve = r)
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
   await ui.run(`openConversation("${id}")`);
+  await unlockConversationCompletion(ui);
   const pending = ui.get("complete-conversation").click();
   await ui.run('showLogin(); appState.currentUser = { id: "another-owner" };');
   resolve({ body: conversationEvaluation() }); await pending;
@@ -228,6 +492,7 @@ test("Completing a conversation stops shared TTS and releases its ObjectURL", as
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? { body: conversationEvaluation() }
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
   await ui.run(`openConversation("${id}")`);
+  await unlockConversationCompletion(ui);
   await ui.run('globalThis.completionAudio = new Audio("blob:test"); globalThis.completionController = new AbortController(); currentSpeech = { controller: completionController, audio: completionAudio, url: "blob:test", button: $("send-chat"), voice: true, generation: conversationGeneration };');
   await ui.get("complete-conversation").click();
   assert.equal(ui.run("completionAudio.paused"), true);
@@ -238,7 +503,7 @@ test("Completing a conversation stops shared TTS and releases its ObjectURL", as
 test("Completion authentication failure clears account and evaluation state", async () => {
   const ui = await app({ handle: req => req.path.endsWith("/complete") ? { status: 401 }
     : req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
-  await ui.run(`openConversation("${id}")`); await ui.get("complete-conversation").click();
+  await ui.run(`openConversation("${id}")`); await unlockConversationCompletion(ui); await ui.get("complete-conversation").click();
   assert.equal(ui.state().currentUser, null);
   assert.equal(ui.state().currentConversation, null);
   assert.equal(ui.get("conversation-evaluation").children.length, 0);
@@ -255,6 +520,15 @@ test("Meu Progresso opens with ALL_TIME and renders the three read-only areas", 
   assert.equal(ui.get("progress-conversations").textContent,"8"); assert.equal(ui.get("progress-readings").textContent,"10"); assert.equal(ui.get("progress-new-words").textContent,"37"); assert.equal(ui.get("progress-mastered").textContent,"28");
   assert.equal(ui.get("progress-conversation-difficulty").children.length,2); assert.equal(ui.get("progress-reading-difficulty").children.length,1); assert.equal(ui.get("progress-timeline").children.length,6);
   assert.equal(ui.calls.filter(r=>r.path==="/api/v1/progress").length,1); assert.equal(ui.calls.filter(r=>r.path==="/api/v1/progress/timeline").length,1);
+});
+test("Progress analytics render real accessible charts for each area", async () => {
+  const ui = await app({ handle: progressReply }); await ui.click("Meu Progresso"); await new Promise(resolve => setImmediate(resolve));
+  assert.match(ui.get("progress-conversation-chart").innerHTML, /<svg/);
+  assert.match(ui.get("progress-reading-chart").innerHTML, /progress-bar-chart/);
+  assert.match(ui.get("progress-vocabulary-chart").innerHTML, /progress-donut/);
+  assert.match(ui.get("progress-evolution-chart").innerHTML, /<svg/);
+  assert.equal(ui.get("progress-conversation-chart").getAttribute("role"), "img");
+  assert.match(ui.get("progress-conversation-chart").getAttribute("aria-label"), /Desempenho/);
 });
 test("Loading rápido não produz flash e termina com a região livre", async () => {
   const ui = await app({ handle: progressReply });
@@ -307,9 +581,10 @@ test("Progress period filters are explicit and backend remains the authority", a
 });
 test("Progress empty data keeps sections visible, uses em dash, and shows no alert", async () => {
   const empty={period:"ALL_TIME",periodStart:null,periodEnd:"2026-09-16T12:00:00Z",overview:{conversationsCompleted:0,readingsCompleted:0,wordsFirstSeen:0,wordsMasteredCurrent:0},conversation:{totalEvaluated:0,successCount:0,needsPracticeCount:0,successRate:null,averageOverall:null,averageCommunication:null,averageGrammar:null,averageVocabulary:null,averageFluency:null,byDifficulty:[]},reading:{totalCompleted:0,successCount:0,needsPracticeCount:0,successRate:null,averageComprehension:null,byDifficulty:[]},vocabulary:{totalWords:0,newCount:0,learningCount:0,reviewingCount:0,masteredCount:0,dueForReview:0,wordsFirstSeenInPeriod:0,wordsReviewedInPeriod:0}};
-  const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:empty}:progressReply(req)}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
+  const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:empty}:req.path==="/api/v1/progress/timeline"?{body:{points:[]}}:progressReply(req)}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ui.get("progress-conversations").textContent, "0"); assert.equal(ui.get("progress-readings").textContent, "0"); assert.equal(ui.get("progress-word-count").textContent, "0"); assert.equal(ui.get("progress-conversation-average").textContent,"—"); assert.equal(ui.get("progress-reading-average").textContent,"—"); assert.equal(ui.state().currentUser.id,"owner");
   assert.equal(ui.get("progress-status").textContent, "");
+  assert.match(ui.get("progress-conversation-chart").innerHTML, /Ainda não há conversas/); assert.match(ui.get("progress-reading-chart").innerHTML, /Ainda não há leituras/); assert.match(ui.get("progress-vocabulary-chart").innerHTML, /Ainda não há palavras/); assert.match(ui.get("progress-evolution-chart").innerHTML, /Pratique/);
 });
 test("Progress request failure still shows the real error", async () => {
   const ui = await app({ handle: req => { if (req.path === "/api/v1/progress") throw new Error("network"); return progressReply(req); } });
@@ -326,9 +601,12 @@ test("Progress accepts null comparison and empty timeline metrics from a success
   const ui=await app({handle:req=>req.path==="/api/v1/progress"?{body:empty}:{body:{points:[{period:"2026-09",conversation:null,reading:null,vocabulary:null}]}}}); await ui.click("Meu Progresso"); await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ui.get("progress-content").hidden,false); assert.equal(ui.get("progress-timeline").children.length,1); assert.match(ui.get("progress-timeline").children[0].children[1].textContent,/Conversação: — \(0\)/);
 });
-test("Sidebar exposes learning tools and uses an internal scroll region", () => {
-  for (const view of ["home","chat","reading","vocabulary","translate","correct","scenarios","conversations","progress","profile"]) assert.match(html, new RegExp(`data-view="${view}"`));
-  assert.equal(html.includes('data-view="account"'), false); assert.match(fs.readFileSync(path.join(__dirname,"styles.css"),"utf8"),/\.sidebar nav[^}]*overflow-y:\s*auto/);
+test("Primary navigation exposes exactly five destinations and keeps an internal scroll region", () => {
+  const primary = html.match(/<nav id="primary-nav"[\s\S]*?<\/nav>/)?.[0] || "";
+  const labels = [...primary.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map(match => match[1].replace(/<[^>]+>/g, "").trim());
+  assert.deepEqual(labels, ["Início", "Praticar", "Conversas", "Meu Progresso", "Perfil"]);
+  for (const view of ["reading", "vocabulary", "translate", "correct", "scenarios"]) assert.equal(primary.includes(`data-view="${view}"`), false);
+  assert.equal(html.includes('data-view="account"'), false); assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.sidebar nav[^}]*overflow-y:\s*auto/);
 });
 test("Stale progress response cannot replace a newer account or filter", async () => {
   let release; const ui=await app({handle:req=>req.path==="/api/v1/progress"?new Promise(resolve=>release=resolve):progressReply(req)});
@@ -699,6 +977,28 @@ test("Reading separates setup and content, and Back preserves the last selection
   assert.equal(ui.run("readingState.current"), null);
 });
 
+test("Reading keeps three accessible radio cards and the profile recommendation", async () => {
+  const ui = await app({ handle: readingReply });
+  await ui.run('currentProfile = { englishLevel: "B1" }; showView("reading")');
+  const picker = ui.get("reading-difficulty").children[0];
+  const options = picker.children.slice(1);
+  assert.equal(picker.className, "reading-difficulty-picker");
+  assert.equal(options.length, 3);
+  assert.deepEqual(options.map(option => option.children[0].value), ["BEGINNER", "INTERMEDIATE", "ADVANCED"]);
+  options.forEach(option => {
+    assert.match(option.className, /reading-difficulty-card/);
+    assert.equal(option.children[0].type, "radio");
+    assert.equal(option.children[0].name, "difficulty-reading");
+  });
+  assert.equal(options[1].children[0].checked, true);
+  assert.match(options[1].className, /is-recommended/);
+  assert.equal(options[1].children[1].children[0].children[1].children[0].textContent, "Recomendado para você");
+  assert.equal(options[2].children[1].children[0].children[2].textContent, "✓");
+  assert.equal(options[0].children[1].children[1].textContent, "Textos mais simples, com vocabulário comum e mais apoio.");
+  assert.equal(options[0].children[1].innerHTML, undefined);
+  assert.equal(options[0].children[1].children.length, 2);
+});
+
 test("Reading Hint remains available while TTS is preparing or playing", async () => {
   let releaseSpeech;
   const speechResponse = new Promise(resolve => { releaseSpeech = () => resolve({ body: {} }); });
@@ -824,7 +1124,7 @@ test("Reading prevents duplicate generation and hint requests with independent l
     : req.path === "/api/v1/reading/hint" ? new Promise(resolve => { releaseHint = () => resolve(readingReply(req)); }) : null });
   await ui.click("Leitura");
   const generating = ui.get("reading-generate").click();
-  assert.equal(ui.get("reading-generate").textContent, "Gerando texto...");
+  assert.equal(ui.get("reading-generate").textContent, "Gerando leitura...");
   await ui.run("generateReading()");
   assert.equal(ui.calls.filter(r => r.path === "/api/v1/reading/generate").length, 1);
   releaseGenerate(); await generating;
@@ -925,8 +1225,11 @@ async function app({ authenticated = false, handle } = {}) {
   const progressStructure = [...elements.keys()].filter(id => id.startsWith("progress-") && id !== "progress-content");
   get("progress-content").append(...progressStructure.map(get));
   const nav = [...html.matchAll(/<button\b([^>]*data-view="([^"]+)"[^>]*)>([\s\S]*?)<\/button>/g)].map(m => {
-    const el = new Element(); el.dataset.view = m[2]; el.textContent = m[3].replace(/<[^>]+>/g, "").trim(); return el;
+    const idMatch = m[1].match(/\bid="([^"]+)"/);
+    const el = idMatch ? get(idMatch[1]) : new Element();
+    el.dataset.view = m[2]; el.className = m[1].match(/\bclass="([^"]+)"/)?.[1] || ""; el.textContent = m[3].replace(/<[^>]+>/g, "").trim(); return el;
   });
+  const primaryNav = nav.filter(button => button.className.split(/\s+/).includes("primary-nav-item"));
   const pages = [...elements.values()].filter(el => el.id.startsWith("view-"));
   get("chat-language").value = "en";
   get("chat-mode").value = "text";
@@ -938,12 +1241,12 @@ async function app({ authenticated = false, handle } = {}) {
         : selector.startsWith('[data-view="') ? nav.filter(el => selector === `[data-view="${el.dataset.view}"]`) : [] },
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }), confirm: () => true },
     navigator: {}, sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    performance, AbortController, FormData, Blob, Event, TextDecoder, TextEncoder, URL, Audio: FakeAudio, setTimeout, clearTimeout, console,
+    performance, AbortController, FormData, Blob, Event, TextDecoder, TextEncoder, URL, Audio: FakeAudio, setTimeout, clearTimeout, setInterval: () => ({}), clearInterval: () => {}, console,
     fetch: async (url, options = {}) => {
       const request = { path: new URL(url).pathname, method: options.method ?? "GET", headers: options.headers || {}, body: typeof options.body === "string" ? JSON.parse(options.body) : undefined };
       calls.push(request);
       const custom = await handle?.(request);
-      if (custom) return new Response(JSON.stringify(custom.body ?? {}), { status: custom.status ?? 200 });
+      if (custom) return new Response(custom.body === undefined ? null : JSON.stringify(custom.body), { status: custom.status ?? 200 });
       const bodies = { "/api/v1/users/me": { id: "owner", username: "Learner" }, "/api/v1/users/me/profile": {},
         "/api/v1/avatars": [], "/api/v1/conversation-scenarios": scenarios, "/api/v1/conversations": [conversation("JOB_INTERVIEW")] };
       if (request.path.endsWith("/messages/stream")) return new Response("{}", { status: 503 });
@@ -955,7 +1258,7 @@ async function app({ authenticated = false, handle } = {}) {
   const run = code => vm.runInContext(code, sandbox);
   for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
   if (!authenticated) run('appState.currentUser = { id: "owner" };');
-  return { get, nav, calls, run, storage, state: () => run("appState"), click: name => nav.find(el => el.textContent === name).click() };
+  return { get, nav, primaryNav, calls, run, storage, state: () => run("appState"), click: name => nav.find(el => el.textContent === name).click() };
 }
 
 test("Home CTA navigates to Scenarios and never creates a conversation", async () => {
@@ -965,6 +1268,41 @@ test("Home CTA navigates to Scenarios and never creates a conversation", async (
   assert.equal(ui.state().currentView, "scenarios"); assert.equal(ui.get("view-chat").hidden, true);
   assert.equal(ui.get("scenario-list").children.length, 3);
   assert.equal(ui.calls.filter(r => r.method === "POST").length, 0);
+});
+
+test("Scenario cards keep independent accessible compact preferences and submit their selected values", async () => {
+  const ui = await app({ handle: request => request.method === "POST" && request.path === "/api/v1/conversations"
+    ? { body: conversation("RESTAURANT", "ADVANCED") } : request.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run('currentProfile = { englishLevel: "B1" }; showView("scenarios")');
+  const cards = ui.get("scenario-list").children;
+  assert.equal(cards.length, 3);
+  const configurations = cards.map(card => ({ difficulty: card.children[2], mode: card.children[3] }));
+  configurations.forEach(({ difficulty, mode }, index) => {
+    assert.equal(difficulty.className, "conversation-difficulty-picker");
+    const options = difficulty.children[1].children;
+    assert.equal(options.length, 3);
+    assert.deepEqual(options.map(option => option.children[0].value), ["BEGINNER", "INTERMEDIATE", "ADVANCED"]);
+    options.forEach(option => assert.equal(option.children[0].type, "radio"));
+    assert.equal(options[1].children[0].checked, true);
+    assert.match(difficulty.children[2].children[1].children[2].textContent, /Conversas mais naturais/);
+    assert.equal(mode.className, "conversation-mode-picker");
+    assert.equal(mode.children.slice(1).length, 2);
+    assert.deepEqual(mode.children.slice(1).map(option => option.children[0].value), ["text", "voice"]);
+    assert.notEqual(options[0].children[0].name, configurations[(index + 1) % configurations.length].difficulty.children[1].children[0].children[0].name);
+  });
+  const firstDifficulty = configurations[0].difficulty.children[1].children;
+  firstDifficulty.forEach(option => { option.children[0].checked = option.children[0].value === "ADVANCED"; });
+  await firstDifficulty[2].children[0].click();
+  assert.match(configurations[0].difficulty.children[2].children[1].children[2].textContent, /Inglês mais natural/);
+  assert.match(configurations[0].difficulty.children[2].children[1].children[1].textContent, /Recomendado: Intermediário/);
+  assert.match(configurations[1].difficulty.children[2].children[1].children[2].textContent, /Conversas mais naturais/);
+  const firstModes = configurations[0].mode.children.slice(1);
+  firstModes.forEach(option => { option.children[0].checked = option.children[0].value === "voice"; });
+  await firstModes[1].children[0].click();
+  await cards[0].children[4].click();
+  const creation = ui.calls.find(request => request.method === "POST" && request.path === "/api/v1/conversations");
+  assert.deepEqual(creation.body, { scenario: "RESTAURANT", language: "en", difficulty: "ADVANCED" });
+  assert.equal(ui.get("chat-mode").value, "voice");
 });
 
 test("Every chat navigation entry redirects without a loaded conversation", async () => {
@@ -1077,14 +1415,114 @@ test("A normal authenticated entry also starts at Home", async () => {
   assert.equal(ui.state().currentConversation, null);
 });
 
+test("Home daily Vocabulary uses the persisted incomplete lesson and its real CTA", async () => {
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/vocabulary/today"
+    ? { body: vocabularyLesson } : request.path === "/api/v1/progress" ? { body: progressData() } : null });
+  assert.equal(ui.get("home-vocabulary-card").getAttribute("aria-busy"), "false");
+  assert.equal(ui.get("home-vocabulary-content").hidden, false);
+  assert.equal(ui.get("home-vocabulary-marker").textContent, "Li\u00e7\u00e3o dispon\u00edvel");
+  assert.equal(ui.get("home-vocabulary-description").textContent, "Sua li\u00e7\u00e3o de vocabul\u00e1rio ainda n\u00e3o foi conclu\u00edda.");
+  assert.equal(ui.get("home-vocabulary-detail").textContent, "10 palavras preparadas para hoje.");
+  assert.equal(ui.get("home-vocabulary-action").textContent, "Come\u00e7ar li\u00e7\u00e3o");
+  await ui.get("home-vocabulary-action").click();
+  assert.equal(ui.state().currentView, "vocabulary");
+});
+
+test("Home daily Vocabulary derives completion only from progress.completedAt", async () => {
+  const completed = { ...vocabularyLesson, progress: { ...vocabularyLesson.progress, completedAt: "2026-09-21T10:00:00Z" } };
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/vocabulary/today"
+    ? { body: completed } : request.path === "/api/v1/progress" ? { body: progressData() } : null });
+  assert.equal(ui.get("home-vocabulary-marker").textContent, "\u2713 Li\u00e7\u00e3o conclu\u00edda");
+  assert.equal(ui.get("home-vocabulary-description").textContent, "Voc\u00ea completou sua li\u00e7\u00e3o de hoje.");
+  assert.equal(ui.get("home-vocabulary-detail").textContent, "10 palavras praticadas hoje.");
+  assert.equal(ui.get("home-vocabulary-action").textContent, "Revisar vocabul\u00e1rio");
+});
+
+test("Slow Home dashboard requests keep their loading state local and finish cleanly", async () => {
+  let releaseVocabulary, releaseProgress;
+  const ui = await app({ authenticated: true, handle: request => {
+    if (request.path === "/api/v1/vocabulary/today") return new Promise(resolve => { releaseVocabulary = resolve; });
+    if (request.path === "/api/v1/progress") return new Promise(resolve => { releaseProgress = resolve; });
+    return null;
+  }});
+  assert.equal(ui.state().currentView, "home");
+  assert.equal(ui.get("home-vocabulary-card").getAttribute("aria-busy"), "true");
+  assert.equal(ui.get("home-progress-card").getAttribute("aria-busy"), "true");
+  assert.equal(ui.get("home-vocabulary-content").hidden, true);
+  assert.equal(ui.get("home-progress-content").hidden, true);
+  releaseVocabulary({ body: vocabularyLesson }); releaseProgress({ body: progressData() });
+  for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("home-vocabulary-card").getAttribute("aria-busy"), "false");
+  assert.equal(ui.get("home-progress-card").getAttribute("aria-busy"), "false");
+  assert.equal(ui.get("home-vocabulary-content").hidden, false);
+  assert.equal(ui.get("home-progress-content").hidden, false);
+});
+
+test("Home Vocabulary and Progress failures do not break the rest of Home", async () => {
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/vocabulary/today" || request.path === "/api/v1/progress"
+    ? { status: 503, body: { message: "Unavailable" } } : null });
+  assert.equal(ui.state().currentView, "home");
+  assert.equal(ui.get("home-vocabulary-content").hidden, true);
+  assert.equal(ui.get("home-progress-content").hidden, true);
+  assert.equal(ui.get("home-vocabulary-status").textContent, "N\u00e3o foi poss\u00edvel carregar sua li\u00e7\u00e3o de hoje.");
+  assert.equal(ui.get("home-progress-status").textContent, "N\u00e3o foi poss\u00edvel carregar seu resumo agora.");
+  await ui.nav.find(button => button.dataset.view === "chat").click();
+  assert.equal(ui.state().currentView, "scenarios");
+});
+
+test("Home Progress uses only the API overview and opens the full Progress view", async () => {
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/vocabulary/today"
+    ? { body: vocabularyLesson } : request.path === "/api/v1/progress" ? { body: progressData() } : null });
+  assert.equal(ui.get("home-progress-conversations").textContent, "8");
+  assert.equal(ui.get("home-progress-readings").textContent, "10");
+  assert.equal(ui.get("home-progress-words").textContent, "37");
+  await ui.get("home-progress-action").click();
+  assert.equal(ui.state().currentView, "progress");
+});
+
+test("Home keeps one conversation hero and offers Reading, Correction and Translation as secondary cards", async () => {
+  const home = html.match(/<section id="view-home"[\s\S]*?<\/section>\s*<section id="view-chat"/)[0];
+  assert.equal((home.match(/data-view="chat"/g) ?? []).length, 1);
+  assert.match(home, /class="home-status-grid"/);
+  assert.match(home, /class="conversation-hero-content"/);
+  assert.match(home, /conversation-hero-illustration/);
+  assert.match(home, /<img src="assets\/conversation-hero\.png" alt="" width="1774" height="887" decoding="async">/);
+  assert.match(home, /id="home-progress-conversations" class="progress-value"><\/strong><span class="progress-label">Conversas avaliadas/);
+  assert.equal(home.includes("referencia-layout"), false);
+  assert.equal(home.includes("hero-art"), false);
+  for (const label of ["Leitura", "Corre\u00e7\u00e3o", "Tradu\u00e7\u00e3o"]) assert.match(home, new RegExp(label));
+  const ui = await app({ authenticated: true });
+  for (const [view, cta] of [["reading", "Praticar leitura"], ["correct", "Corrigir frase"], ["translate", "Traduzir texto"]]) {
+    await ui.nav.find(button => button.dataset.view === view && button.textContent.includes(cta)).click();
+    assert.equal(ui.state().currentView, view);
+    await ui.run('showView("home")');
+  }
+});
+
 test("Sidebar separates new conversation from conversation history", async () => {
   const ui = await app({ authenticated: true });
-  assert.equal(ui.nav.filter(button => button.dataset.view === "chat").length, 2); // Home content CTAs only; the sidebar has no chat destination.
-  assert.ok(ui.nav.some(button => button.dataset.view === "scenarios" && button.textContent.includes("Nova conversa")));
-  await ui.click("Nova conversa");
+  assert.deepEqual(ui.primaryNav.map(button => button.dataset.view), ["home", "practice", "conversations", "progress", "profile"]);
+  assert.equal(ui.primaryNav.some(button => button.dataset.view === "scenarios"), false);
+  await ui.click("Praticar");
+  assert.equal(ui.state().currentView, "practice");
+  await ui.nav.find(button => button.dataset.view === "scenarios" && button.textContent.includes("Começar conversa")).click();
   assert.equal(ui.state().currentView, "scenarios");
   await ui.click("Conversas");
   assert.equal(ui.state().currentView, "conversations");
+});
+
+test("Praticar is a hub and routes every activity to its existing view", async () => {
+  const ui = await app({ authenticated: true }); await ui.click("Praticar");
+  assert.equal(ui.state().currentView, "practice"); assert.equal(ui.get("view-practice").hidden, false);
+  assert.equal(ui.primaryNav.find(button => button.dataset.view === "practice").classList.contains("active"), true);
+  for (const [view, label] of [["scenarios", "Começar conversa"], ["reading", "Praticar leitura"], ["vocabulary", "Praticar vocabulário"], ["correct", "Corrigir frase"], ["translate", "Traduzir texto"]]) {
+    const action = ui.nav.find(button => button.dataset.view === view && button.textContent.includes(label));
+    assert.ok(action, `missing ${label}`); await action.click(); assert.equal(ui.state().currentView, view);
+    assert.equal(ui.primaryNav.find(button => button.dataset.view === "practice").classList.contains("active"), true);
+    await ui.run('showView("practice")');
+  }
+  const progressAction = ui.nav.find(button => button.dataset.view === "progress" && button.textContent.includes("Ver meu progresso"));
+  assert.ok(progressAction); await progressAction.click(); assert.equal(ui.state().currentView, "progress");
 });
 
 test("New conversation clears the previous conversation without deleting it", async () => {
@@ -1092,7 +1530,7 @@ test("New conversation clears the previous conversation without deleting it", as
   await ui.run('appState.currentUser = { id: "owner" };');
   await ui.run(`openConversation("${id}")`);
   assert.equal(ui.state().currentConversation.id, id);
-  await ui.click("Nova conversa"); await new Promise(resolve => setImmediate(resolve));
+  await ui.click("Praticar"); await ui.nav.find(button => button.dataset.view === "scenarios" && button.textContent.includes("Começar conversa")).click(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.state().currentConversation, null);
   assert.equal(ui.state().currentView, "scenarios");
   assert.equal(ui.calls.filter(request => request.method === "DELETE").length, 0);
@@ -1107,7 +1545,7 @@ test("Conversation opened from history keeps history active", async () => {
   assert.equal(ui.nav.find(button => button.dataset.view === "scenarios").classList.contains("active"), false);
 });
 
-test("Conversation history distinguishes active and ended entries and hides ended deletion", async () => {
+test("Conversation history renders compact active and completed entries and preserves opening", async () => {
   const active = { ...conversation("FREE_TALK"), id: "active-id", updatedAt: "2026-09-17T12:00:00Z" };
   const ended = { ...conversation("JOB_INTERVIEW"), id: "ended-id", endedAt: "2026-09-16T12:00:00Z" };
   const ui = await app({ handle: req => req.path === "/api/v1/conversations" ? { body: [active, ended] }
@@ -1117,13 +1555,49 @@ test("Conversation history distinguishes active and ended entries and hides ende
   const cards = ui.get("conversation-list").children;
   assert.equal(cards.length, 2);
   assert.match(cards[0].className, /conversation-active/);
-  assert.equal(cards[0].children.find(el => el.className === "conversation-state").textContent, "● Ativa");
+  assert.equal(cards[0].children[1].children[0].children.find(el => el.className === "conversation-state").textContent, "● Em andamento");
   assert.ok(cards[0].children.at(-1).children.some(button => button.textContent === "Excluir"));
   assert.match(cards[1].className, /conversation-ended/);
-  assert.equal(cards[1].children.find(el => el.className === "conversation-state").textContent, "✓ Encerrada");
+  assert.equal(cards[1].children[1].children[0].children.find(el => el.className === "conversation-state").textContent, "✓ Concluída");
   assert.equal(cards[1].children.at(-1).children.some(button => button.textContent === "Excluir"), false);
   await cards[1].children.at(-1).children[0].click();
   assert.equal(ui.get("delete-conversation").hidden, true);
+});
+
+test("Conversation history filters and search stay local to the loaded records", async () => {
+  const active = { ...conversation("FREE_TALK"), id: "active-id", updatedAt: "2026-09-17T12:00:00Z" };
+  const completed = { ...conversation("RESTAURANT"), id: "completed-id", endedAt: "2026-09-16T12:00:00Z" };
+  const ui = await app({ handle: req => req.path === "/api/v1/conversations" ? { body: [active, completed] } : null });
+  await ui.run('showView("conversations")');
+  assert.equal(ui.get("conversation-total").textContent, "2");
+  assert.equal(ui.get("conversation-completed").textContent, "1");
+  assert.equal(ui.get("conversation-active").textContent, "1");
+  await ui.get("conversation-filter-active").click();
+  assert.equal(ui.get("conversation-list").children.length, 1);
+  assert.match(ui.get("conversation-list").children[0].className, /conversation-active/);
+  await ui.get("conversation-filter-completed").click();
+  assert.equal(ui.get("conversation-list").children.length, 1);
+  assert.match(ui.get("conversation-list").children[0].className, /conversation-ended/);
+  const search = ui.get("conversation-search"); search.value = "Layla";
+  for (const handler of search.handlers.input || []) await handler({ currentTarget: search });
+  assert.equal(ui.get("conversation-list").children.length, 1);
+  search.value = "sem resultado";
+  for (const handler of search.handlers.input || []) await handler({ currentTarget: search });
+  assert.match(ui.get("conversation-list").children[0].className, /conversation-empty-state is-filtered/);
+  assert.equal(ui.calls.filter(call => call.path === "/api/v1/conversations").length, 1);
+});
+
+test("Conversation history empty state opens the existing new conversation flow without fictitious metrics", async () => {
+  const ui = await app({ handle: req => req.path === "/api/v1/conversations" ? { body: [] } : null });
+  await ui.run('showView("conversations")');
+  const empty = ui.get("conversation-list").children[0];
+  assert.match(empty.className, /conversation-empty-state/);
+  assert.equal(empty.children[0].textContent, "Você ainda não iniciou nenhuma conversa.");
+  assert.equal(ui.get("conversation-total").textContent, "0");
+  assert.doesNotMatch(html, /Tempo total|Avaliação média|Duração/);
+  await empty.children.at(-1).click();
+  assert.equal(ui.state().currentView, "scenarios");
+  assert.match(styles, /@media \(max-width: 580px\).*\.conversations-hero \{ display: block;/s);
 });
 
 test("Conversation created from new conversation keeps new conversation active", async () => {
@@ -1199,13 +1673,13 @@ test("Repeated start clicks while generating cannot issue a second creation", as
   assert.equal(ui.state().currentView, "chat");
 });
 
-test("Profile includes account information and the sidebar has no separate Account page", async () => {
+test("Profile includes account information without a separate Account page", async () => {
   const ui = await app();
   await ui.click("Perfil");
   assert.equal(ui.state().currentView, "profile");
   assert.equal(html.includes('data-view="account"'), false);
-  assert.ok(ui.get("account-logout"));
-  assert.ok(ui.get("account-email"));
+  assert.ok(ui.get("profile-email"));
+  assert.ok(ui.get("logout"));
 });
 
 test("Collapsed sidebar still opens Profile", async () => {
@@ -1236,9 +1710,9 @@ test("Header profile and logout are independent button controls", () => {
 
 test("Editing Profile preserves current values and Cancel does not persist edits", async () => {
   const ui = await app();
-  await ui.run('currentProfile = { preferredName: "Ana", age: 25, englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_01", onboardingCompleted: true }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Ana", imageUrl: "/a" }]; appState.avatars = avatarCatalog; renderProfileSummary(currentProfile); openProfileEdit();');
+  await ui.run('currentProfile = { preferredName: "Ana", birthDate: "2001-04-18", englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_01", onboardingStatus: "COMPLETED" }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Ana", imageUrl: "/a" }]; appState.avatars = avatarCatalog; renderProfileSummary(currentProfile); openProfileEdit();');
   assert.equal(ui.get("profile-name").value, "Ana");
-  assert.equal(ui.get("profile-age").value, 25);
+  assert.equal(ui.get("profile-birth-date").value, "2001-04-18");
   assert.equal(ui.get("profile-level").value, "B1");
   assert.equal(ui.get("profile-goal").value, "WORK");
   ui.get("profile-name").value = "Outro nome";
@@ -1247,16 +1721,50 @@ test("Editing Profile preserves current values and Cancel does not persist edits
   assert.equal(ui.calls.filter(request => request.method === "PUT").length, 0);
 });
 
+test("Profile summary uses the real account and profile data without duplicating its page avatar", async () => {
+  const ui = await app();
+  await ui.run('appState.currentUser = { username: "ana_silva", email: "ana@example.com", emailVerified: true, createdAt: "2024-09-15T12:00:00Z" }; currentProfile = { preferredName: "Ana", birthDate: "2001-04-18", englishLevel: "C1", learningGoal: "CONVERSATION", avatarKey: "avatar_01", onboardingStatus: "COMPLETED" }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Leo", imageUrl: "/one" }]; renderProfileSummary(currentProfile);');
+  assert.equal(ui.get("profile-summary-name").textContent, "Ana");
+  assert.equal(ui.get("profile-summary-username").textContent, "ana_silva");
+  assert.equal(ui.get("profile-email").textContent, "ana@example.com");
+  assert.equal(ui.get("profile-email-verified-row").hidden, false);
+  assert.match(ui.get("profile-member-since").textContent, /Membro desde setembro de 2024/);
+  assert.equal(ui.get("profile-summary-level").textContent, "C1 — Avançado");
+  assert.equal(ui.get("profile-summary-goal").textContent, "Conversação");
+  assert.equal(ui.get("profile-edit-button").textContent, "Editar perfil");
+  assert.equal([...html.matchAll(/id="profile-avatar-slot"/g)].length, 1);
+});
+
+test("Profile keeps the avatar picker compact and renders neutral accessible appearance options", async () => {
+  const ui = await app();
+  await ui.run('currentProfile = { preferredName: "Ana", avatarKey: "avatar_01", onboardingStatus: "COMPLETED" }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Leo", imageUrl: "/one" }, { key: "avatar_02", displayName: "Larissa", imageUrl: "/two" }]; appState.avatars = avatarCatalog; openProfileEdit();');
+  assert.equal(ui.get("avatar-picker").hidden, true);
+  assert.equal(ui.get("profile-avatar-toggle").getAttribute("aria-expanded"), "false");
+  await ui.get("profile-avatar-toggle").click();
+  assert.equal(ui.get("avatar-picker").hidden, false);
+  assert.equal(ui.get("profile-avatar-toggle").getAttribute("aria-expanded"), "true");
+  const options = ui.get("avatar-grid").children;
+  assert.equal(options.length, 2);
+  options.forEach((option, index) => {
+    assert.equal(option.getAttribute("aria-label"), `Escolher aparência ${index + 1}`);
+    assert.equal(option.children.length, 2);
+    assert.doesNotMatch(option.textContent, /Leo|Larissa/);
+  });
+  await options[1].click();
+  assert.equal(ui.get("avatar-grid").children[1].classList.contains("selected"), true);
+  assert.equal(ui.run("profileDraftAvatarKey"), "avatar_02");
+});
+
 test("Profile save updates shared state and commits the selected avatar", async () => {
-  const savedProfile = { preferredName: "Ana Maria", age: 26, englishLevel: "B2", learningGoal: "TRAVEL", avatarKey: "avatar_01", onboardingCompleted: true };
+  const savedProfile = { preferredName: "Ana Maria", birthDate: "2000-04-18", englishLevel: "B2", learningGoal: "TRAVEL", avatarKey: "avatar_01", onboardingStatus: "PENDING" };
   const ui = await app({ handle: request => {
     if (request.path === "/api/v1/users/me/profile" && request.method === "PUT") return { body: savedProfile };
     if (request.path === "/api/v1/users/me/profile/avatar/predefined" && request.method === "PUT") return { body: { ...savedProfile, avatarKey: "avatar_02" } };
     return null;
   }});
-  await ui.run('currentProfile = { preferredName: "Ana", age: 25, englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_01", onboardingCompleted: true }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Um", imageUrl: "/one" }, { key: "avatar_02", displayName: "Dois", imageUrl: "/two" }]; appState.avatars = avatarCatalog; openProfileEdit();');
+  await ui.run('currentProfile = { preferredName: "Ana", birthDate: "2001-04-18", englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_01", onboardingStatus: "PENDING" }; appState.profile = currentProfile; avatarCatalog = [{ key: "avatar_01", displayName: "Um", imageUrl: "/one" }, { key: "avatar_02", displayName: "Dois", imageUrl: "/two" }]; appState.avatars = avatarCatalog; openProfileEdit();');
   ui.get("profile-name").value = "Ana Maria";
-  ui.get("profile-age").value = "26";
+  ui.get("profile-birth-date").value = "2000-04-18";
   ui.get("profile-level").value = "B2";
   ui.get("profile-goal").value = "TRAVEL";
   await ui.get("avatar-grid").children[1].click();
@@ -1268,28 +1776,68 @@ test("Profile save updates shared state and commits the selected avatar", async 
   assert.equal(ui.get("header-avatar-slot").children[0].src, "http://localhost:8080/two");
   const avatarWrite = ui.calls.find(request => request.path === "/api/v1/users/me/profile/avatar/predefined");
   assert.deepEqual(avatarWrite.body, { avatarKey: "avatar_02" });
+  const profileWrite = ui.calls.find(request => request.path === "/api/v1/users/me/profile" && request.method === "PUT");
+  assert.deepEqual(profileWrite.body, { preferredName: "Ana Maria", birthDate: "2000-04-18", englishLevel: "B2", learningGoal: "TRAVEL" });
 });
 
 test("Profile shows the CEFR label and difficulty cards recommend the matching level", async () => {
   const ui = await app({ authenticated: true });
-  await ui.run('currentProfile = { preferredName: "Ana", age: 25, englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_default", onboardingCompleted: true }; appState.profile = currentProfile; renderProfileSummary(currentProfile); showView("scenarios");');
+  await ui.run('currentProfile = { preferredName: "Ana", birthDate: "2001-04-18", englishLevel: "B1", learningGoal: "WORK", avatarKey: "avatar_default", onboardingStatus: "COMPLETED" }; appState.profile = currentProfile; renderProfileSummary(currentProfile); showView("scenarios");');
   assert.equal(ui.get("profile-summary-level").textContent, "B1 — Intermediário");
   const card = ui.get("scenario-list").children[0];
   const picker = card.children.find(child => child.className === "conversation-difficulty-picker");
-  const options = picker.children.filter(child => child.className === "difficulty-option");
+  const options = picker.children[1].children;
   assert.equal(options[1].children[0].checked, true);
-  assert.match(options[1].children[1].innerHTML, /Recomendado para você/);
-  assert.match(options[0].children[1].innerHTML, /Frases mais simples/);
-  assert.match(options[2].children[1].innerHTML, /Expressões e phrasal verbs/);
+  assert.equal(picker.children[2].children[1].children[1].textContent, "Recomendado");
+  assert.equal(options[0].children.length, 3);
+  assert.match(picker.children[2].children[1].children[2].textContent, /Conversas mais naturais/);
+});
+
+test("Pending onboarding is offered after authenticated Home and Agora não is session-only", async () => {
+  const profile = { preferredName: null, birthDate: null, englishLevel: null, learningGoal: null, avatarKey: "avatar_default", onboardingStatus: "PENDING" };
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/users/me/profile" ? { body: profile } : null });
+  await ui.run("showHome()");
+  assert.equal(ui.get("onboarding-offer").hidden, false);
+  await ui.get("onboarding-later").click();
+  assert.equal(ui.get("onboarding-offer").hidden, true);
+  assert.equal(ui.calls.some(request => request.path.endsWith("/onboarding/dismiss")), false);
+  await ui.run("showHome()");
+  assert.equal(ui.get("onboarding-offer").hidden, true);
+});
+
+test("Pending onboarding opens Profile, while dismissed and completed profiles do not show automatic offer", async () => {
+  const pending = { birthDate: null, avatarKey: "avatar_default", onboardingStatus: "PENDING" };
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/users/me/profile" ? { body: pending } : null });
+  await ui.run("showHome()");
+  await ui.get("onboarding-complete").click();
+  assert.equal(ui.state().currentView, "profile");
+  assert.equal(ui.get("profile-edit-panel").hidden, false);
+  await ui.run('currentProfile = { avatarKey: "avatar_01", birthDate: "2000-01-01", onboardingStatus: "COMPLETED" }; appState.profile = currentProfile; renderProfileSummary(currentProfile);');
+  assert.equal(ui.get("onboarding-offer").hidden, true);
+  await ui.run('currentProfile = { avatarKey: "avatar_default", onboardingStatus: "DISMISSED" }; appState.profile = currentProfile; renderProfileSummary(currentProfile);');
+  assert.equal(ui.get("onboarding-offer").hidden, true);
+});
+
+test("Não mostrar novamente persists dismissed onboarding without blocking Profile", async () => {
+  const pending = { avatarKey: "avatar_default", onboardingStatus: "PENDING" };
+  const dismissed = { ...pending, onboardingStatus: "DISMISSED" };
+  const ui = await app({ authenticated: true, handle: request => request.path.endsWith("/onboarding/dismiss") ? { body: dismissed } : request.path === "/api/v1/users/me/profile" ? { body: pending } : null });
+  await ui.run("showHome()");
+  await ui.get("onboarding-dismiss").click();
+  assert.equal(ui.state().profile.onboardingStatus, "DISMISSED");
+  assert.equal(ui.get("onboarding-offer").hidden, true);
+  assert.ok(ui.calls.some(request => request.path === "/api/v1/users/me/profile/onboarding/dismiss" && request.method === "POST"));
+  await ui.click("Perfil");
+  assert.equal(ui.state().currentView, "profile");
 });
 
 test("Missing profile level recommends Intermediate while the user can choose another difficulty", async () => {
   const ui = await app({ authenticated: true });
   await ui.run('currentProfile = { englishLevel: null }; appState.profile = currentProfile; showView("scenarios");');
   const picker = ui.get("scenario-list").children[0].children.find(child => child.className === "conversation-difficulty-picker");
-  const options = picker.children.filter(child => child.className === "difficulty-option");
+  const options = picker.children[1].children;
   assert.equal(options[1].children[0].checked, true);
-  assert.equal(options[1].children[1].innerHTML.includes("Recomendado para você"), false);
+  assert.equal(picker.children[2].children[1].children.length, 2);
   options[0].children[0].checked = true; options[1].children[0].checked = false;
   assert.equal(ui.run('difficultyForEnglishLevel("C2")'), "ADVANCED");
   assert.equal(ui.run('difficultyForEnglishLevel("A2")'), "BEGINNER");
@@ -1469,9 +2017,10 @@ test("Scenario creation sends only the selected controlled difficulty and reopen
   await ui.run('showView("scenarios")');
   const card = ui.get("scenario-list").children[1];
   const picker = card.children.find(child => child.className === "conversation-difficulty-picker");
-  picker.children[1].children[0].checked = false;
-  picker.children[2].children[0].checked = false;
-  picker.children[3].children[0].checked = true;
+  const options = picker.children[1].children;
+  options[0].children[0].checked = false;
+  options[1].children[0].checked = false;
+  options[2].children[0].checked = true;
   await card.children.at(-1).click();
   const request = ui.calls.find(call => call.method === "POST" && call.path === "/api/v1/conversations");
   assert.equal(request.body.difficulty, "ADVANCED");
