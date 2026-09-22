@@ -92,6 +92,8 @@ test("Reopening an ended conversation restores history and evaluation without an
   await ui.run(`openConversation("${id}")`);
   assert.equal(ui.get("conversation-evaluation").hidden, false);
   assert.equal(ui.get("chat-messages").children.length, 2);
+  assert.equal(ui.get("chat-messages").scrollCalls.at(-1).top, ui.get("chat-messages").scrollHeight);
+  assert.equal(ui.get("chat-messages").scrollCalls.at(-1).behavior, "auto");
   assert.equal(ui.get("complete-conversation").textContent, "Conversa concluída");
   assert.equal(ui.get("send-chat").disabled, true);
   assert.equal(ui.calls.some(req => req.method === "POST"), false);
@@ -188,13 +190,78 @@ test("Active conversation has no evaluation toggle and switching conversations r
 });
 
 test("Conversation messages keep a viewport-based internal scroll region", async () => {
-  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.chat-messages[^}]*overflow-y:\s*auto/);
-  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /#view-chat \.chat-card[^}]*min-height:\s*0/);
-  assert.equal(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8").includes(".chat-messages { min-height: clamp"), false);
-  assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.conversation-evaluation[^}]*max-height:\s*min\(/);
+  const styles = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+  assert.match(styles, /\.chat-messages[^}]*min-height:\s*0[^}]*flex:\s*1[^}]*overflow-y:\s*auto/);
+  assert.match(styles, /#view-chat \{ height: calc\(100dvh - 128px\); min-height: 540px; display: flex; flex-direction: column; \}/);
+  assert.match(styles, /#view-chat \.chat-card[^}]*min-height:\s*0/);
+  assert.match(styles, /@media \(min-width: 801px\) \{[\s\S]*?#view-chat > \.chat-page-heading,[\s\S]*?#view-chat > \.chat-footnote \{[\s\S]*?position: absolute;/);
+  assert.equal(styles.includes(".chat-messages { min-height: clamp"), false);
+  assert.match(styles, /\.conversation-evaluation[^}]*max-height:\s*min\(/);
   assert.match(html, /id="conversation-progress-bar"[^>]*role="progressbar"/);
   assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /\.chat-assistant \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(270px, \.72fr\)/);
   assert.match(fs.readFileSync(path.join(__dirname, "styles.css"), "utf8"), /@media \(max-width: 560px\)[\s\S]*\.chat-bubble, \.user \.chat-bubble \{ margin-inline: 0;/);
+});
+
+test("Real view changes reset the document scroll through the central navigation flow", async () => {
+  const ui = await app();
+  ui.root.scrollTop = 420; ui.root.scrollCalls = [];
+  await ui.run('showView("profile")');
+  assert.equal(ui.root.scrollTop, 0);
+  assert.equal(ui.root.scrollCalls.at(-1).top, 0);
+  assert.equal(ui.root.scrollCalls.at(-1).left, 0);
+  assert.equal(ui.root.scrollCalls.at(-1).behavior, "auto");
+
+  ui.root.scrollTop = 280; ui.root.scrollCalls = [];
+  await ui.run('showView("profile")');
+  assert.equal(ui.root.scrollTop, 280);
+  assert.equal(ui.root.scrollCalls.length, 0);
+
+  ui.root.scrollTop = 360;
+  await ui.primaryNav.find(button => button.dataset.view === "practice").click();
+  assert.equal(ui.state().currentView, "practice");
+  assert.equal(ui.root.scrollTop, 0);
+
+  ui.root.scrollTop = 190;
+  await ui.run('showView("home")');
+  assert.equal(ui.root.scrollTop, 0);
+});
+
+test("Conversation detail scrolls its rendered history to the latest message after loading", async () => {
+  const stored = detail("RESTAURANT");
+  stored.messages.push({ role: "USER", content: "A later persisted message." }, { role: "ASSISTANT", content: "The latest persisted reply." });
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: stored } : null });
+  ui.root.scrollTop = 500; ui.root.scrollCalls = [];
+  const messages = ui.get("chat-messages"); messages.scrollCalls = [];
+  await ui.run(`openConversation("${id}")`);
+  assert.equal(ui.get("view-chat").hidden, false);
+  assert.equal(messages.children.at(-1).children[1].textContent, "The latest persisted reply.");
+  assert.equal(messages.scrollCalls.length, 1);
+  assert.equal(messages.scrollCalls[0].top, messages.scrollHeight);
+  assert.equal(messages.scrollCalls[0].behavior, "auto");
+  assert.equal(ui.root.scrollCalls.at(-1).top, 0);
+  assert.equal(ui.root.scrollCalls.at(-1).left, 0);
+});
+
+test("Chat follows new turns but does not pull a reader away during scheduled streaming updates", async () => {
+  const ui = await app({ handle: req => req.path === `/api/v1/conversations/${id}` ? { body: detail("RESTAURANT") } : null });
+  await ui.run(`openConversation("${id}")`);
+  const messages = ui.get("chat-messages"); messages.scrollCalls = [];
+  await ui.run('appendChatMessage("user", "A newly sent message.")');
+  assert.equal(messages.scrollCalls.at(-1).top, messages.scrollHeight);
+  assert.equal(messages.scrollCalls.at(-1).behavior, "smooth");
+
+  messages.scrollCalls = []; messages.scrollTop = 0;
+  messages.handlers.scroll.forEach(handler => handler());
+  await ui.run("scheduleChatScrollToLatest()");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(messages.scrollCalls.length, 0);
+
+  messages.scrollTop = messages.scrollHeight;
+  messages.handlers.scroll.forEach(handler => handler());
+  await ui.run("scheduleChatScrollToLatest()");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(messages.scrollCalls.at(-1).top, messages.scrollHeight);
+  assert.equal(messages.scrollCalls.at(-1).behavior, "smooth");
 });
 
 test("Login hero uses the provided photo and no longer includes the decorative chat card", () => {
@@ -1193,7 +1260,7 @@ test("Reading retains text when TTS or hints fail, including malformed hint fall
 // The DOM and HTTP boundary are fake; no packages, browser credentials or real LLM are needed.
 class Element {
   constructor(id = "") {
-    Object.assign(this, { id, children: [], parentElement: null, detached: false, dataset: {}, handlers: {}, attributes: {}, value: "", hidden: true, disabled: false, textContent: "" });
+    Object.assign(this, { id, children: [], parentElement: null, detached: false, dataset: {}, handlers: {}, attributes: {}, style: {}, value: "", hidden: true, disabled: false, textContent: "", scrollTop: 0, scrollHeight: 1000, clientHeight: 300, scrollCalls: [] });
     const classes = new Set();
     this.classList = { add: (...x) => x.forEach(c => classes.add(c)), remove: (...x) => x.forEach(c => classes.delete(c)),
       contains: x => classes.has(x), toggle: (x, force) => { if (force ?? !classes.has(x)) classes.add(x); else classes.delete(x); } };
@@ -1207,7 +1274,7 @@ class Element {
   detach() { this.detached = true; this.children.forEach(child => child.detach()); this.parentElement = null; }
   replaceWith() {}
   remove() {}
-  scrollTo() {}
+  scrollTo(options = {}) { const top = typeof options === "object" ? options.top : arguments[1]; this.scrollCalls.push(options); if (typeof top === "number") this.scrollTop = top; }
   focus() {}
   querySelectorAll() { return []; }
   async click() { if (this.disabled) return; if (this.onclick) await this.onclick(); for (const fn of this.handlers.click ?? []) await fn({ preventDefault() {}, currentTarget: this }); }
@@ -1219,7 +1286,7 @@ class FakeAudio {
   removeAttribute() {}
   load() {}
 }
-async function app({ authenticated = false, handle } = {}) {
+async function app({ authenticated = false, handle, themeStorage = new Map(), systemDark = false } = {}) {
   const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(m => [m[1], new Element(m[1])]));
   const get = key => { assert.ok(elements.has(key), `DOM id exists: ${key}`); return elements.get(key); };
   const progressStructure = [...elements.keys()].filter(id => id.startsWith("progress-") && id !== "progress-content");
@@ -1234,13 +1301,16 @@ async function app({ authenticated = false, handle } = {}) {
   get("chat-language").value = "en";
   get("chat-mode").value = "text";
   const storage = new Map(authenticated ? [["englishai_access_token", "test-access"], ["englishai_refresh_token", "test-refresh"]] : []);
+  const root = new Element("html");
+  const systemThemeListeners = new Set();
+  const mediaQuery = { matches: systemDark, addEventListener: (type, listener) => { if (type === "change") systemThemeListeners.add(listener); }, removeEventListener: (type, listener) => { if (type === "change") systemThemeListeners.delete(listener); } };
   const calls = [];
   const sandbox = {
-    document: { getElementById: id => { const element = elements.get(id); return element?.detached ? null : element; }, createElement: () => new Element(), head: new Element(),
+    document: { documentElement: root, scrollingElement: root, getElementById: id => { const element = elements.get(id); return element?.detached ? null : element; }, createElement: () => new Element(), head: new Element(),
       querySelectorAll: selector => selector === ".page-view" ? pages : selector === "[data-view]" ? nav
         : selector.startsWith('[data-view="') ? nav.filter(el => selector === `[data-view="${el.dataset.view}"]`) : [] },
-    window: { addEventListener() {}, matchMedia: () => ({ matches: false }), confirm: () => true },
-    navigator: {}, sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
+    window: { addEventListener() {}, matchMedia: () => mediaQuery, confirm: () => true },
+    navigator: {}, localStorage: { getItem: key => themeStorage.get(key) ?? null, setItem: (key, value) => themeStorage.set(key, value), removeItem: key => themeStorage.delete(key) }, sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     performance, AbortController, FormData, Blob, Event, TextDecoder, TextEncoder, URL, Audio: FakeAudio, setTimeout, clearTimeout, setInterval: () => ({}), clearInterval: () => {}, console,
     fetch: async (url, options = {}) => {
       const request = { path: new URL(url).pathname, method: options.method ?? "GET", headers: options.headers || {}, body: typeof options.body === "string" ? JSON.parse(options.body) : undefined };
@@ -1258,8 +1328,67 @@ async function app({ authenticated = false, handle } = {}) {
   const run = code => vm.runInContext(code, sandbox);
   for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
   if (!authenticated) run('appState.currentUser = { id: "owner" };');
-  return { get, nav, primaryNav, calls, run, storage, state: () => run("appState"), click: name => nav.find(el => el.textContent === name).click() };
+  return { get, nav, primaryNav, calls, run, storage, themeStorage, root, state: () => run("appState"), setSystemTheme: dark => { mediaQuery.matches = dark; systemThemeListeners.forEach(listener => listener({ matches: dark })); }, click: name => nav.find(el => el.textContent === name).click() };
 }
+
+test("Theme defaults invalid preferences to system and applies the active system color", async () => {
+  const storage = new Map([["englishai.theme", "neon"]]);
+  const ui = await app({ themeStorage: storage, systemDark: true });
+  assert.equal(storage.get("englishai.theme"), "system");
+  assert.equal(ui.root.getAttribute("data-theme"), "dark");
+  assert.equal(ui.root.getAttribute("data-theme-preference"), "system");
+  assert.equal(ui.get("theme-system").getAttribute("aria-pressed"), "true");
+});
+
+test("Theme defaults to system before the application renders", async () => {
+  const ui = await app({ systemDark: false });
+  assert.equal(ui.themeStorage.get("englishai.theme"), "system");
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+  assert.match(html, /localStorage\.getItem\("englishai\.theme"\)[\s\S]*<link rel="stylesheet" href="styles\.css">/);
+});
+
+test("Theme selector persists light and dark preferences with an explicit data-theme", async () => {
+  const storage = new Map([["englishai.theme", "light"]]);
+  const ui = await app({ themeStorage: storage, systemDark: true });
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+  await ui.get("theme-dark").click();
+  assert.equal(storage.get("englishai.theme"), "dark");
+  assert.equal(ui.root.getAttribute("data-theme"), "dark");
+  assert.equal(ui.get("theme-dark").getAttribute("aria-pressed"), "true");
+  assert.equal(ui.get("theme-dark").classList.contains("is-selected"), true);
+  await ui.get("theme-light").click();
+  assert.equal(storage.get("englishai.theme"), "light");
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+});
+
+test("System theme follows system changes while explicit choices remain stable", async () => {
+  const ui = await app({ themeStorage: new Map([["englishai.theme", "system"]]), systemDark: false });
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+  ui.setSystemTheme(true);
+  assert.equal(ui.root.getAttribute("data-theme"), "dark");
+  await ui.get("theme-light").click();
+  ui.setSystemTheme(false);
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+  await ui.get("theme-dark").click();
+  ui.setSystemTheme(false);
+  assert.equal(ui.root.getAttribute("data-theme"), "dark");
+});
+
+test("Quick theme toggle saves the opposite effective appearance", async () => {
+  const ui = await app({ themeStorage: new Map([["englishai.theme", "system"]]), systemDark: true });
+  assert.equal(ui.root.getAttribute("data-theme"), "dark");
+  await ui.get("theme-quick-toggle").click();
+  assert.equal(ui.themeStorage.get("englishai.theme"), "light");
+  assert.equal(ui.root.getAttribute("data-theme"), "light");
+  assert.equal(ui.get("theme-quick-toggle").getAttribute("aria-label"), "Usar tema escuro");
+});
+
+test("Profile exposes an accessible three-option appearance selector", () => {
+  const profileMarkup = html.slice(html.indexOf('id="view-profile"'), html.indexOf('id="view-progress"'));
+  assert.match(profileMarkup, /id="profile-appearance-title">Aparência/);
+  for (const preference of ["light", "dark", "system"]) assert.match(profileMarkup, new RegExp(`id="theme-${preference}"[^>]*data-theme-option="${preference}"[^>]*aria-pressed`));
+  assert.match(profileMarkup, /class="theme-selector" role="group" aria-label="Selecionar aparência"/);
+});
 
 test("Home CTA navigates to Scenarios and never creates a conversation", async () => {
   const ui = await app(); await ui.run('showView("home")'); await ui.click("Começar uma conversa");

@@ -2,6 +2,8 @@
 const BACKEND_URL = "http://localhost:8080";
 const GOOGLE_CLIENT_ID = "491728559092-frggmogjfh3mmh0kkduuk11053lucfp3.apps.googleusercontent.com";
 const ACCESS_KEY = "englishai_access_token", REFRESH_KEY = "englishai_refresh_token";
+const THEME_STORAGE_KEY = "englishai.theme";
+const THEME_PREFERENCES = new Set(["light", "dark", "system"]);
 
 const CONVERSATION_MIN_USER_MESSAGES = 5;
 let chatHistory = [];
@@ -20,6 +22,51 @@ const $ = id => document.getElementById(id);
 const LOADING_DELAY_MS = 200;
 const loadingOperations = new Map();
 const loginView = $("login-view"), appView = $("app-view");
+const themeMediaQuery = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+let themePreference = "system";
+const normalizeThemePreference = value => THEME_PREFERENCES.has(value) ? value : "system";
+const getStoredThemePreference = () => { try { return globalThis.localStorage?.getItem(THEME_STORAGE_KEY); } catch (_) { return null; } };
+const persistThemePreference = value => { try { globalThis.localStorage?.setItem(THEME_STORAGE_KEY, value); } catch (_) {} };
+const getEffectiveTheme = (preference = themePreference) => preference === "dark" || preference === "system" && Boolean(themeMediaQuery?.matches) ? "dark" : "light";
+function renderThemeControls() {
+  ["light", "dark", "system"].forEach(value => {
+    const control = $(`theme-${value}`);
+    if (!control) return;
+    const selected = themePreference === value;
+    control.setAttribute("aria-pressed", String(selected));
+    control.classList.toggle("is-selected", selected);
+  });
+  const quickToggle = $("theme-quick-toggle");
+  if (!quickToggle) return;
+  const effectiveTheme = getEffectiveTheme();
+  const nextLabel = effectiveTheme === "dark" ? "Usar tema claro" : "Usar tema escuro";
+  quickToggle.setAttribute("aria-label", nextLabel);
+  quickToggle.title = nextLabel;
+  quickToggle.classList.toggle("is-dark", effectiveTheme === "dark");
+}
+function applyThemePreference(value, { persist = true } = {}) {
+  themePreference = normalizeThemePreference(value);
+  if (persist) persistThemePreference(themePreference);
+  const effectiveTheme = getEffectiveTheme();
+  const root = document.documentElement;
+  root?.setAttribute?.("data-theme", effectiveTheme);
+  root?.setAttribute?.("data-theme-preference", themePreference);
+  if (root?.style) root.style.colorScheme = effectiveTheme;
+  const themeColor = $("theme-color-meta");
+  if (themeColor) themeColor.setAttribute("content", effectiveTheme === "dark" ? "#11131c" : "#5155c9");
+  renderThemeControls();
+  return effectiveTheme;
+}
+function initializeTheme() {
+  const stored = getStoredThemePreference();
+  const preference = normalizeThemePreference(stored);
+  if (stored !== preference) persistThemePreference(preference);
+  applyThemePreference(preference, { persist: false });
+}
+function toggleQuickTheme() { applyThemePreference(getEffectiveTheme() === "dark" ? "light" : "dark"); }
+initializeTheme();
+if (themeMediaQuery?.addEventListener) themeMediaQuery.addEventListener("change", () => { if (themePreference === "system") applyThemePreference("system", { persist: false }); });
+else if (themeMediaQuery?.addListener) themeMediaQuery.addListener(() => { if (themePreference === "system") applyThemePreference("system", { persist: false }); });
 const tokens = () => ({ accessToken: sessionStorage.getItem(ACCESS_KEY), refreshToken: sessionStorage.getItem(REFRESH_KEY) });
 const saveTokens = data => { if (data?.accessToken && data?.refreshToken) { sessionStorage.setItem(ACCESS_KEY, data.accessToken); sessionStorage.setItem(REFRESH_KEY, data.refreshToken); } };
 const clearSession = () => { sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); };
@@ -183,7 +230,14 @@ function progressElement(id) {
   if (!element) throw new Error(`[Progress] missing DOM element #${id}`);
   return element;
 }
+function resetPageScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  if (!scroller) return;
+  if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  else scroller.scrollTop = 0;
+}
 function showView(name) {
+  const previousView = appState.currentView;
   if (appState.currentView === "reading" && name !== "reading") returnToReadingSetup();
   if (appState.currentView === "progress" && name !== "progress") resetProgress();
   if (name === "chat" && (!appState.currentUser || !validConversation(appState.currentConversation))) name = "scenarios";
@@ -202,11 +256,29 @@ function showView(name) {
     b.classList.toggle("active", b.dataset.view === target);
     b.setAttribute("aria-current", b.dataset.view === target ? "page" : "false");
   });
+  if (previousView !== name) resetPageScroll();
   if (name === "scenarios" && appState.currentUser) return loadScenarios().catch(() => { loadingOperations.get("scenario-loading")?.finish(); setMessage("scenario-status", "Não foi possível carregar os cenários."); });
   if (name === "conversations" && appState.currentUser) return loadConversations().catch(() => setMessage("conversation-status", "Não foi possível carregar as conversas."));
 }
 
 function chatScrollBehavior() { return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth"; }
+let chatShouldFollowLatest = true, pendingChatScroll = false;
+function isNearChatBottom() {
+  const messages = $("chat-messages");
+  return !messages || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 72;
+}
+function scrollChatToLatest({ behavior = chatScrollBehavior(), force = false } = {}) {
+  const messages = $("chat-messages");
+  if (!messages || (!force && !chatShouldFollowLatest)) return;
+  messages.scrollTo({ top: messages.scrollHeight, behavior });
+  chatShouldFollowLatest = true;
+}
+function scheduleChatScrollToLatest() {
+  if (pendingChatScroll) return;
+  pendingChatScroll = true;
+  const schedule = window.requestAnimationFrame?.bind(window) || (callback => setTimeout(callback, 0));
+  schedule(() => { pendingChatScroll = false; scrollChatToLatest(); });
+}
 function isLinguisticUserMessage(message) {
   return message?.role === "user" && typeof message.content === "string" && /\p{L}/u.test(message.content);
 }
@@ -268,6 +340,7 @@ async function prepareGoogle() { if (!window.google?.accounts?.id || GOOGLE_CLIE
 async function logout() { clearCurrentConversation(); const refreshToken = tokens().refreshToken; try { if (refreshToken) await request("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }); } finally { showLogin(); } }
 
 document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => { if (button.dataset.view === "scenarios") appState.conversationNavigationContext = "new"; if (button.dataset.view === "conversations") appState.conversationNavigationContext = "history"; showView(button.dataset.view); }));
+$("chat-messages").addEventListener("scroll", () => { chatShouldFollowLatest = isNearChatBottom(); });
 ["all", "active", "completed"].forEach(filter => $("conversation-filter-" + filter).addEventListener("click", () => { conversationHistoryFilter = filter; renderConversationHistory(); }));
 $("conversation-search").addEventListener("input", () => { conversationHistoryQuery = $("conversation-search").value; renderConversationHistory(); });
 $("sidebar-toggle")?.addEventListener("click", () => { appState.sidebarCollapsed = !appState.sidebarCollapsed; globalThis.localStorage?.setItem("englishai_sidebar_collapsed", String(appState.sidebarCollapsed)); applySidebarState(); });
@@ -285,7 +358,7 @@ function chatMessageAvatar(role) {
   const avatar = avatarCatalog.find(item => item.key === (currentProfile || appState.profile)?.avatarKey);
   return avatar?.imageUrl ? createAvatarElement({ imageUrl: avatar.imageUrl, alt: "Seu avatar", className: "chat-message-avatar user-avatar" }) : null;
 }
-function appendChatMessage(role,text,pending=false){document.querySelectorAll(".chat-welcome").forEach(el => el.remove());const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong"),avatar=chatMessageAvatar(role),name=document.createElement("span");name.textContent=role==="user"?"Você":appState.currentConversation?.assistantDisplayName||"";if(avatar)label.append(avatar);label.append(name);const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.hidden=false;bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);if(role==="assistant"&&text.trim())item.speechAction=appendAssistantActions(item,text,appState.currentConversation?.language);$("chat-messages").append(item);$("chat-messages").scrollTo({top:$("chat-messages").scrollHeight,behavior:chatScrollBehavior()});return {item,bubble};}
+function appendChatMessage(role,text,pending=false,{ scroll = true }={}){document.querySelectorAll(".chat-welcome").forEach(el => el.remove());const item=document.createElement("article");item.className="chat-message "+role;const label=document.createElement("strong"),avatar=chatMessageAvatar(role),name=document.createElement("span");name.textContent=role==="user"?"Você":appState.currentConversation?.assistantDisplayName||"";if(avatar)label.append(avatar);label.append(name);const bubble=document.createElement("p");bubble.className="chat-bubble";bubble.hidden=false;bubble.textContent=text;if(pending)bubble.classList.add("pending");item.append(label,bubble);if(role==="assistant"&&text.trim())item.speechAction=appendAssistantActions(item,text,appState.currentConversation?.language);$("chat-messages").append(item);if(scroll)scrollChatToLatest({force:true});return {item,bubble};}
 
 // Only the current request/player owns an audio URL; rendered history does not retain audio state.
 let currentSpeech = null;
@@ -1123,7 +1196,7 @@ async function sendChatMessage(message, language, options) {
         if (firstToken === undefined) firstToken = performance.now();
         if (options.voice) setVoiceState("streaming");
         assistant.bubble.textContent += chunk.text;
-        $("chat-messages").scrollTo({ top: $("chat-messages").scrollHeight, behavior: chatScrollBehavior() });
+        scheduleChatScrollToLatest();
       } else if (name === "complete") {
         const meta = parseChatEvent(value);
         if (!meta || typeof meta !== "object" || !assistant.bubble.textContent.trim()) throw new ChatStreamError("Invalid stream");
@@ -1180,7 +1253,7 @@ async function sendChatMessage(message, language, options) {
       if (options.voice) setVoiceState("idle");
       updateConversationControls();
     }
-    $("chat-messages").scrollTo({ top: $("chat-messages").scrollHeight, behavior: chatScrollBehavior() });
+    scrollChatToLatest();
   }
   if (chat.complete && options.voice && isVoiceMode() && options.generation === conversationGeneration) {
     const reveal = () => {
@@ -1593,7 +1666,7 @@ async function openConversation(id, expectedScenario, options = {}) {
     updateConversationProgress();
     let openingItem;
     for (const message of detail.messages) {
-      const item = appendChatMessage(message.role.toLowerCase(), message.content);
+      const item = appendChatMessage(message.role.toLowerCase(), message.content, false, { scroll: false });
       if (!openingItem && options.playOpening && message.role === "ASSISTANT") openingItem = item;
       if (message.correctedText) {
         const correction = document.createElement("div");
@@ -1603,6 +1676,7 @@ async function openConversation(id, expectedScenario, options = {}) {
       }
     }
     showView("chat");
+    scrollChatToLatest({ behavior: "auto", force: true });
     if (validConversationEvaluation(detail.evaluation, conversation.id)) renderConversationEvaluation(detail.evaluation);
     else if (conversation.endedAt) setMessage("conversation-completion-status", "Conversa concluída.");
     updateConversationControls();
@@ -1632,6 +1706,7 @@ async function openConversation(id, expectedScenario, options = {}) {
 async function deleteConversation(id, options = {}) { if (!window.confirm("Excluir esta conversa? Todas as mensagens desta conversa serão removidas permanentemente.")) return; const r = await authenticatedRequest(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }); const statusId = options.statusId || "conversation-status"; if (!r.response.ok) return setMessage(statusId, errorMessage(r.response.status)); if (appState.currentConversation?.id === id) { if (options.navigateToNew) { appState.conversationNavigationContext = "new"; clearCurrentConversation(); await showView("scenarios"); } else showView("conversations"); } await loadConversations(); if (appState.currentView === "scenarios") await loadScenarios(); }
 try { $("profile-form").addEventListener("submit",saveProfile); } catch (_) {}
 try { $("profile-edit-button").addEventListener("click",openProfileEdit); $("profile-cancel-button").addEventListener("click",closeProfileEdit); $("profile-avatar-toggle").addEventListener("click",()=>setAvatarPickerOpen(!avatarPickerOpen)); } catch (_) {}
+try { ["light", "dark", "system"].forEach(value => $("theme-" + value).addEventListener("click", () => applyThemePreference(value))); $("theme-quick-toggle").addEventListener("click", toggleQuickTheme); } catch (_) {}
 try { $("onboarding-complete").addEventListener("click",openOnboardingProfile); $("onboarding-later").addEventListener("click",()=>{onboardingDeferredForSession=true;renderOnboardingOffer();}); $("onboarding-dismiss").addEventListener("click",dismissOnboarding); } catch (_) {}
 document.querySelectorAll('[data-view="profile"]').forEach(b=>b.addEventListener("click",loadProfileArea));
 $("delete-conversation").addEventListener("click", () => deleteConversation(appState.currentConversation?.id, { navigateToNew: true, statusId: "conversation-completion-status" }));
