@@ -1,5 +1,15 @@
 ﻿// Development-only UI. Tokens remain only in sessionStorage.
-const BACKEND_URL = "http://localhost:8080";
+const resolveBackendUrl = () => {
+  const configuredUrl = globalThis.ENGLISHAI_BACKEND_URL;
+  if (typeof configuredUrl === "string" && configuredUrl.trim()) return configuredUrl.trim().replace(/\/+$/, "");
+  const { hostname, protocol } = globalThis.location ?? {};
+  if (hostname) {
+    const host = hostname.includes(":") ? `[${hostname}]` : hostname;
+    return `${protocol === "https:" ? "https" : "http"}://${host}:8080`;
+  }
+  return "http://localhost:8080";
+};
+const BACKEND_URL = resolveBackendUrl();
 const GOOGLE_CLIENT_ID = "491728559092-frggmogjfh3mmh0kkduuk11053lucfp3.apps.googleusercontent.com";
 const ACCESS_KEY = "englishai_access_token", REFRESH_KEY = "englishai_refresh_token";
 const THEME_STORAGE_KEY = "englishai.theme";

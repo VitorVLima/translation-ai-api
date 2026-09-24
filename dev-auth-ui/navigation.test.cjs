@@ -1286,7 +1286,7 @@ class FakeAudio {
   removeAttribute() {}
   load() {}
 }
-async function app({ authenticated = false, handle, themeStorage = new Map(), systemDark = false } = {}) {
+async function app({ authenticated = false, handle, themeStorage = new Map(), systemDark = false, hostname = "localhost", protocol = "http:", backendUrl } = {}) {
   const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(m => [m[1], new Element(m[1])]));
   const get = key => { assert.ok(elements.has(key), `DOM id exists: ${key}`); return elements.get(key); };
   const progressStructure = [...elements.keys()].filter(id => id.startsWith("progress-") && id !== "progress-content");
@@ -1309,7 +1309,8 @@ async function app({ authenticated = false, handle, themeStorage = new Map(), sy
     document: { documentElement: root, scrollingElement: root, getElementById: id => { const element = elements.get(id); return element?.detached ? null : element; }, createElement: () => new Element(), head: new Element(),
       querySelectorAll: selector => selector === ".page-view" ? pages : selector === "[data-view]" ? nav
         : selector.startsWith('[data-view="') ? nav.filter(el => selector === `[data-view="${el.dataset.view}"]`) : [] },
-    window: { addEventListener() {}, matchMedia: () => mediaQuery, confirm: () => true },
+    window: { addEventListener() {}, matchMedia: () => mediaQuery, confirm: () => true, location: { hostname, protocol } },
+    location: { hostname, protocol }, ENGLISHAI_BACKEND_URL: backendUrl,
     navigator: {}, localStorage: { getItem: key => themeStorage.get(key) ?? null, setItem: (key, value) => themeStorage.set(key, value), removeItem: key => themeStorage.delete(key) }, sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     performance, AbortController, FormData, Blob, Event, TextDecoder, TextEncoder, URL, Audio: FakeAudio, setTimeout, clearTimeout, setInterval: () => ({}), clearInterval: () => {}, console,
     fetch: async (url, options = {}) => {
@@ -1330,6 +1331,18 @@ async function app({ authenticated = false, handle, themeStorage = new Map(), sy
   if (!authenticated) run('appState.currentUser = { id: "owner" };');
   return { get, nav, primaryNav, calls, run, storage, themeStorage, root, state: () => run("appState"), setSystemTheme: dark => { mediaQuery.matches = dark; systemThemeListeners.forEach(listener => listener({ matches: dark })); }, click: name => nav.find(el => el.textContent === name).click() };
 }
+
+test("Development API base follows the hostname serving the UI", async () => {
+  const localhost = await app({ hostname: "localhost" });
+  assert.equal(await localhost.run("BACKEND_URL"), "http://localhost:8080");
+  const lan = await app({ hostname: "192.0.2.44" });
+  assert.equal(await lan.run("BACKEND_URL"), "http://192.0.2.44:8080");
+});
+
+test("An explicit API URL takes priority over the development hostname", async () => {
+  const ui = await app({ hostname: "192.0.2.44", backendUrl: "https://api.example.test/" });
+  assert.equal(await ui.run("BACKEND_URL"), "https://api.example.test");
+});
 
 test("Theme defaults invalid preferences to system and applies the active system color", async () => {
   const storage = new Map([["englishai.theme", "neon"]]);
