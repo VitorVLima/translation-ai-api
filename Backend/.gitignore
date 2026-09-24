@@ -2,6 +2,15 @@ HELP.md
 .env
 .env.*
 !.env.example
+
+# Local database backups and dumps. Flyway migrations stay versioned.
+*-backup-*.sql
+*.dump
+*.backup
+
+# Runtime avatar uploads. Official assets live under src/main/resources/avatars/official.
+/data/profile-images/
+
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
