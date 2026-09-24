@@ -164,7 +164,11 @@ Sucesso 200 é binário, não JSON: `Content-Type: audio/wav`, `Cache-Control: n
 
 Translate, correct, explain, chat não streaming, STT e TTS enviam `Cache-Control: no-store`. Auth de tokens envia `no-store` e `Pragma: no-cache`; register, verify, resend, forgot, reset e users/me não definem explicitamente esses headers.
 
-CORS padrão: `http://localhost:5500`, métodos GET/POST/OPTIONS, headers Content-Type/Authorization e sem credenciais. Isso é relevante para a UI web; React Native nativo normalmente não depende de CORS.
+CORS usa uma allowlist explícita. Sem `APP_CORS_ALLOWED_ORIGINS`, as origens permitidas são `http://localhost:5500`, `http://127.0.0.1:5500` e `http://localhost:5501`. Quando a variável é definida, ela fornece a lista separada por vírgulas de origens exatas autorizadas; inclua também as origens locais que ainda devem funcionar.
+
+Não há `allowedOrigins("*")`, `allowedOriginPatterns("*")` nem outro wildcard global. Métodos permitidos: GET, POST, PUT, PATCH, DELETE e OPTIONS. Headers permitidos: `Content-Type` e `Authorization`. `allowCredentials(false)` permanece intencional: clientes autenticados enviam `Authorization: Bearer <accessToken>`, e não cookies cross-origin.
+
+Para desenvolvimento pela LAN, acrescente a origem exata da interface, por exemplo `http://<IP-DO-PC>:5500`, a `APP_CORS_ALLOWED_ORIGINS`, reinicie o Backend e mantenha a porta 8080 acessível na rede local. Um preflight OPTIONS dessa origem autorizada passa pela configuração CORS; uma origem desconhecida continua rejeitada. Isso é relevante para a UI web; React Native nativo normalmente não depende de CORS.
 
 Rate limit local somente para autenticação: login 10/600 s, register 3/600 s, refresh 30/60 s, logout 30/60 s, verify 10/600 s, resend 5/600 s, reset 10/600 s e Google 10/600 s por IP. 429 inclui `Retry-After`. Rate limiting de IA: **NOT IMPLEMENTED YET**.
 

@@ -2,6 +2,12 @@
 
 Serviço local independente de Speech-to-Text usando `faster-whisper`. O modelo é carregado uma única vez, na primeira transcrição, e reutilizado nas chamadas seguintes.
 
+## Integração com o EnglishAI
+
+O Whisper está integrado ao Backend como o provider de STT. `WhisperSpeechToTextProvider` envia o áudio ao endpoint `POST /transcribe` como `multipart/form-data`; os recursos de voz do EnglishAI usam essa transcrição antes de enviar a mensagem textual ao fluxo normal de conversa. O Backend usa `STT_PROVIDER=whisper` e, por padrão, `WHISPER_BASE_URL=http://127.0.0.1:8001`.
+
+O serviço é opcional para funcionalidades exclusivamente textuais. Quando ele não estiver em execução ou estiver indisponível, somente as operações que exigem transcrição falham; conversa textual, leitura, vocabulário, tradução e correção não dependem dele.
+
 Padrao: modelo `small`, CPU e `int8`. O modelo `small` tende a reconhecer melhor gravacoes curtas e com ruido, mas consome mais memoria e pode ser mais lento que `base`. Para voltar ao modelo `base`, defina `WHISPER_MODEL=base`. Os valores podem ser alterados por `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_COMPUTE_TYPE`. O limite padrao e 20 MB (`WHISPER_MAX_FILE_SIZE_MB`).
 
 ## Configuração local e execução no Windows
@@ -61,6 +67,6 @@ curl.exe -X POST http://127.0.0.1:8001/transcribe -F "file=@C:\caminho\audio.wav
 
 Sem `language`, o faster-whisper detecta automaticamente. Com `language`, somente `pt` e `en` são aceitos e o valor é passado diretamente ao modelo.
 
-São aceitos `.wav`, `.mp3`, `.m4a`, `.webm` e `.ogg`. A primeira execução pode baixar o modelo do Hugging Face. O arquivo enviado é temporário e removido após sucesso ou erro; nenhuma transcrição é persistida. Este serviço ainda não está integrado ao Spring Boot nem à UI.
+São aceitos `.wav`, `.mp3`, `.m4a`, `.webm` e `.ogg`. Quando `WHISPER_MODEL` referencia um modelo ainda ausente do cache local do `faster-whisper`, o primeiro carregamento pode baixá-lo; quando referencia um caminho local, esse caminho é usado. O cache em disco é administrado pela biblioteca, e este serviço não configura um diretório de cache próprio. O modelo permanece em memória enquanto o processo estiver ativo. O arquivo enviado é temporário e removido após sucesso ou erro; nenhuma transcrição é persistida.
 
 Para testar: `pytest -v`.

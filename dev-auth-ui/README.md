@@ -15,6 +15,15 @@ python -m http.server 5500
 
 5. Abra `http://localhost:5500` e entre com login local ou Google.
 
+Para LAN, acrescente a origem exata do frontend a `APP_CORS_ALLOWED_ORIGINS` no `Backend/.env` (por exemplo, `http://<IP-DO-PC>:5500`; nunca um wildcard), reinicie o Backend e execute `python -m http.server 5500 --bind 0.0.0.0`. Ao abrir `http://<IP-DO-PC>:5500`, esta UI usa automaticamente `http://<IP-DO-PC>:8080`.
+
+## Resolução da URL do Backend
+
+1. Se `window.ENGLISHAI_BACKEND_URL` estiver definido, a interface usa esse valor, sem barra final.
+2. Caso contrário, usa o protocolo e o hostname da página atual com a porta `8080`: `http://localhost:5500` usa `http://localhost:8080`, e `http://<IP-DO-PC>:5500` usa `http://<IP-DO-PC>:8080`.
+
+A configuração explícita tem prioridade e permite apontar uma interface hospedada para uma API HTTPS implantada.
+
 ## Funcionalidades existentes
 
 - **Início:** atalhos para conversar, traduzir e corrigir.
@@ -24,9 +33,13 @@ python -m http.server 5500
 - **Traduzir:** português ↔ inglês, inversão dos idiomas, limite de 5.000 caracteres e resultado em painel separado.
 - **Corrigir:** correção de inglês, com explicação em português, dicas e exemplos no próprio `POST /api/v1/correct`.
 - **Vocabulário:** lição diária persistida com dez palavras apresentadas uma por vez, cinco questões progressivas, prática escrita avaliada e conclusão recuperada do Backend.
-- **Conta:** nome de usuário, e-mail, confirmação do e-mail e logout.
+- **Leitura:** geração de texto por dificuldade e tema, perguntas, envio de respostas e resultado persistido.
+- **Progresso:** métricas, gráficos e timeline baseados nos dados persistidos no Backend.
+- **Perfil:** onboarding, nível de inglês, objetivo de aprendizagem, data de nascimento, seleção de avatar e temas claro, escuro ou do sistema.
+- **Praticar:** hub para conversação, leitura, vocabulário, tradução e correção.
+- **Conta:** login local, login Google quando configurado, cadastro, confirmação de e-mail por código, reenvio de código e logout.
 
-A autenticação disponível nesta interface é login local e Google. Cadastro, confirmação por link e recuperação/redefinição de senha não estão implementados aqui. O perfil apenas exibe o estado de confirmação retornado pela API.
+A confirmação de e-mail desta interface usa código de seis dígitos, não link. Os endpoints de recuperação e redefinição de senha existem no Backend, mas ainda não possuem fluxo visual nesta interface.
 
 ## Interface e acessibilidade
 
