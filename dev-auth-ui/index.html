@@ -41,6 +41,9 @@
             <input id="email" type="email" autocomplete="username" placeholder="voce@exemplo.com" required>
             <label for="password">Senha</label>
             <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" required>
+            <div class="auth-password-actions">
+              <button id="show-forgot-password" class="auth-forgot-link" type="button" aria-controls="forgot-password-card">Esqueci minha senha</button>
+            </div>
             <button class="primary action" type="submit">Entrar</button>
           </form>
           <div class="separator"><span>ou continue com</span></div>
@@ -66,6 +69,34 @@
           </form>
           <p id="register-message" class="message" role="alert" aria-live="polite"></p>
           <p class="auth-switch">Já tem uma conta? <button id="show-login" class="text-button" type="button">Entrar</button></p>
+        </div>
+        <div id="forgot-password-card" class="forgot-password-card auth-card card" hidden>
+          <span class="eyebrow">RECUPERE SEU ACESSO</span>
+          <h2>Esqueci minha senha.</h2>
+          <p class="muted">Informe seu e-mail para receber as instruções de recuperação.</p>
+          <div id="forgot-request-step">
+            <form id="forgot-request-form" tabindex="-1">
+              <label for="forgot-email">E-mail</label>
+              <input id="forgot-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required>
+              <button id="forgot-request-submit" class="primary action" type="submit">Enviar código</button>
+            </form>
+          </div>
+          <div id="forgot-reset-step" hidden>
+            <p class="muted">Se o e-mail estiver cadastrado, enviaremos um código de 6 dígitos. Confira sua caixa de entrada.</p>
+            <form id="forgot-reset-form" tabindex="-1">
+              <label for="forgot-code">Código de recuperação</label>
+              <input id="forgot-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
+              <label for="forgot-new-password">Nova senha</label>
+              <input id="forgot-new-password" type="password" autocomplete="new-password" minlength="6" maxlength="100" required>
+              <small class="field-hint">Use de 6 a 100 caracteres e no máximo 72 bytes.</small>
+              <label for="forgot-password-confirm">Confirmar nova senha</label>
+              <input id="forgot-password-confirm" type="password" autocomplete="new-password" minlength="6" maxlength="100" required>
+              <button id="forgot-reset-submit" class="primary action" type="submit">Alterar senha</button>
+            </form>
+          </div>
+          <p id="forgot-success" class="forgot-success" hidden>Senha alterada com sucesso.</p>
+          <p id="forgot-password-message" class="message" role="alert" aria-live="polite"></p>
+          <p class="auth-switch"><button id="forgot-back-login" class="text-button" type="button">Voltar para o login</button></p>
         </div>
         <div id="verification-card" class="verification-card auth-card card" hidden>
           <span class="eyebrow">CONFIRME SEU E-MAIL</span>

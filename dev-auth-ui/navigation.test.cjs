@@ -309,6 +309,24 @@ test("The rendered Cadastre-se button keeps registration open while initial sess
   assert.equal(ui.get("register-username").id, "register-username");
 });
 
+test("The real forgot-password action remains open while initial session restoration finishes", async () => {
+  let resolveCurrentUser;
+  const ui = await app({ authenticated: true, handle: request => request.path === "/api/v1/users/me"
+    ? new Promise(resolve => { resolveCurrentUser = resolve; }) : null });
+  const callsBeforeOpen = ui.calls.length;
+  await ui.get("show-forgot-password").click();
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("forgot-password-card").hidden, false);
+  assert.equal(ui.calls.length, callsBeforeOpen);
+  resolveCurrentUser({ status: 401 });
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("forgot-password-card").hidden, false);
+  await ui.get("forgot-back-login").click();
+  assert.equal(ui.get("login-card").hidden, false);
+  assert.equal(ui.get("forgot-password-card").hidden, true);
+});
+
 test("Verified local login continues to Home", async () => {
   const ui = await app({ handle: request => request.path === "/api/v1/auth/login"
     ? { body: { accessToken: "access", refreshToken: "refresh" } } : null });
@@ -2232,4 +2250,70 @@ test("Cancelling voice chat prevents a late TTS response from revealing or playi
   await send;
   assert.equal(await ui.run("currentSpeech"), null);
   assert.equal(ui.get("chat-messages").children.at(-1).children[1].hidden, true);
+});
+
+test("Forgot password has a non-submit control with an active handler and returns to Login without retaining sensitive fields", async () => {
+  const ui = await app();
+  assert.match(html, /<button id="show-forgot-password"[^>]*type="button"[^>]*>/);
+  assert.equal(ui.get("show-forgot-password").handlers.click?.length, 1);
+  ui.get("email").value = "learner@example.com";
+  await ui.get("show-forgot-password").click();
+  assert.equal(ui.get("login-card").hidden, true);
+  assert.equal(ui.get("forgot-password-card").hidden, false);
+  assert.equal(ui.get("forgot-email").value, "learner@example.com");
+  assert.equal(ui.calls.some(item => item.path === "/api/v1/auth/login"), false);
+  assert.equal(ui.calls.some(item => item.path === "/api/v1/auth/forgot-password"), false);
+  ui.get("forgot-email").value = "learner@example.com";
+  await ui.get("forgot-back-login").click();
+  assert.equal(ui.get("login-card").hidden, false);
+  assert.equal(ui.get("forgot-password-card").hidden, true);
+  assert.equal(ui.get("forgot-email").value, "");
+});
+
+test("Forgot password requests a code with the backend contract and advances to reset", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/forgot-password" ? { status: 204 } : null });
+  await ui.get("show-forgot-password").click();
+  ui.get("forgot-email").value = "learner@example.com";
+  await ui.run('requestPasswordReset({ preventDefault() {} })');
+  const request = ui.calls.find(item => item.path === "/api/v1/auth/forgot-password");
+  assert.deepEqual(request.body, { email: "learner@example.com" });
+  assert.equal(ui.get("forgot-request-step").hidden, true);
+  assert.equal(ui.get("forgot-reset-step").hidden, false);
+  assert.match(ui.get("forgot-password-message").textContent, /Se o e-mail estiver cadastrado/);
+});
+
+test("Forgot password rejects a mismatched confirmation without calling reset", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/forgot-password" ? { status: 204 } : null });
+  await ui.get("show-forgot-password").click(); ui.get("forgot-email").value = "learner@example.com";
+  await ui.run('requestPasswordReset({ preventDefault() {} })');
+  ui.get("forgot-code").value = "123456"; ui.get("forgot-new-password").value = "newpass1"; ui.get("forgot-password-confirm").value = "different";
+  await ui.run('resetPassword({ preventDefault() {} })');
+  assert.equal(ui.calls.some(item => item.path === "/api/v1/auth/reset-password"), false);
+  assert.equal(ui.get("forgot-password-message").textContent, "As senhas não coincidem.");
+});
+
+test("Forgot password submits the code and new password and shows success without auto-login", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/forgot-password" || request.path === "/api/v1/auth/reset-password" ? { status: 204 } : null });
+  await ui.get("show-forgot-password").click(); ui.get("forgot-email").value = "learner@example.com";
+  await ui.run('requestPasswordReset({ preventDefault() {} })');
+  ui.get("forgot-code").value = "123456"; ui.get("forgot-new-password").value = "newpass1"; ui.get("forgot-password-confirm").value = "newpass1";
+  await ui.run('resetPassword({ preventDefault() {} })');
+  const request = ui.calls.find(item => item.path === "/api/v1/auth/reset-password");
+  assert.deepEqual(request.body, { email: "learner@example.com", code: "123456", newPassword: "newpass1" });
+  assert.equal(ui.get("forgot-success").hidden, false);
+  assert.equal(ui.get("forgot-new-password").value, "");
+  assert.equal(ui.get("forgot-password-confirm").value, "");
+  assert.equal(ui.get("login-view").hidden, false);
+  assert.equal(ui.get("app-view").hidden, true);
+});
+
+test("Forgot password maps invalid or expired codes without exposing backend details", async () => {
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/forgot-password" ? { status: 204 } : request.path === "/api/v1/auth/reset-password" ? { status: 400, body: { message: "Invalid or expired password reset code" } } : null });
+  await ui.get("show-forgot-password").click(); ui.get("forgot-email").value = "learner@example.com";
+  await ui.run('requestPasswordReset({ preventDefault() {} })');
+  ui.get("forgot-code").value = "123456"; ui.get("forgot-new-password").value = "newpass1"; ui.get("forgot-password-confirm").value = "newpass1";
+  await ui.run('resetPassword({ preventDefault() {} })');
+  assert.equal(ui.get("forgot-password-message").textContent, "Código incorreto ou expirado.");
+  assert.equal(ui.get("forgot-reset-step").hidden, false);
+  assert.doesNotMatch(ui.get("forgot-password-message").textContent, /Invalid|expired|password reset code/);
 });

@@ -23,6 +23,7 @@ let conversationHistory = [], conversationHistoryFilter = "all", conversationHis
 let conversationCompletion = null;
 let progressRequest = null, progressVersion = 0, progressPeriod = "ALL_TIME";
 let pendingVerificationEmail = "", verificationCooldownEnd = 0, verificationTimer = null;
+let pendingPasswordResetEmail = "";
 let authNavigationVersion = 0;
 let onboardingDeferredForSession = false;
 let homeDashboardVersion = 0, homeVocabularyRequest = null, homeProgressRequest = null;
@@ -185,6 +186,23 @@ function resetVerificationState() {
   $("verification-code")?.setAttribute("value", ""); if ($("verification-code")) $("verification-code").value = "";
   setMessage("verification-message");
 }
+function resetPasswordResetState() {
+  pendingPasswordResetEmail = "";
+  ["forgot-email", "forgot-code", "forgot-new-password", "forgot-password-confirm"].forEach(id => { const field = $(id); if (field) field.value = ""; });
+  $("forgot-request-form")?.reset?.(); $("forgot-reset-form")?.reset?.();
+  if ($("forgot-request-step")) $("forgot-request-step").hidden = false;
+  if ($("forgot-reset-step")) $("forgot-reset-step").hidden = true;
+  if ($("forgot-success")) $("forgot-success").hidden = true;
+  setMessage("forgot-password-message");
+}
+function showForgotStep(step) {
+  if ($("forgot-request-step")) $("forgot-request-step").hidden = step !== "request";
+  if ($("forgot-reset-step")) $("forgot-reset-step").hidden = step !== "reset";
+  if ($("forgot-success")) $("forgot-success").hidden = step !== "success";
+  $("forgot-password-message")?.classList.remove("success");
+  if (step === "request") $("forgot-email")?.focus();
+  if (step === "reset") $("forgot-code")?.focus();
+}
 function openVerification(email, { startCooldown = false } = {}) {
   stopVerificationTimer(); verificationCooldownEnd = 0; pendingVerificationEmail = email;
   $("verification-code").value = ""; $("verification-email").textContent = maskEmail(email);
@@ -193,13 +211,29 @@ function openVerification(email, { startCooldown = false } = {}) {
   $("verification-code").focus();
 }
 function showAuthMode(mode = "login") {
-  const loginCard = $("login-card"), registerCard = $("register-card"), verificationCard = $("verification-card");
-  if (!loginCard || !registerCard || !verificationCard) return;
-  const register = mode === "register", verification = mode === "verification";
-  loginCard.hidden = register || verification; registerCard.hidden = !register; verificationCard.hidden = !verification;
-  $("skip-link").setAttribute("href", verification ? "#verification-form" : register ? "#register-form" : "#login-form");
+  const loginCard = $("login-card"), registerCard = $("register-card"), verificationCard = $("verification-card"), forgotCard = $("forgot-password-card");
+  if (!loginCard || !registerCard || !verificationCard || !forgotCard) return;
+  const register = mode === "register", verification = mode === "verification", forgot = mode === "forgot-request" || mode === "forgot-reset" || mode === "forgot-success";
+  loginCard.hidden = register || verification || forgot; registerCard.hidden = !register; verificationCard.hidden = !verification; forgotCard.hidden = !forgot;
+  $("skip-link").setAttribute("href", verification ? "#verification-form" : register ? "#register-form" : forgot ? (mode === "forgot-request" ? "#forgot-request-form" : mode === "forgot-reset" ? "#forgot-reset-form" : "#forgot-back-login") : "#login-form");
   setMessage("message"); setMessage("register-message");
   if (!verification) resetVerificationState();
+  if (!forgot) resetPasswordResetState();
+  if (forgot) showForgotStep(mode.replace("forgot-", ""));
+}
+function openForgotPassword(event) {
+  event.preventDefault();
+  authNavigationVersion++;
+  const email = $("email").value.trim();
+  resetPasswordResetState();
+  $("forgot-email").value = email;
+  showAuthMode("forgot-request");
+}
+function returnToLoginFromPasswordReset(event) {
+  event.preventDefault();
+  authNavigationVersion++;
+  showAuthMode("login");
+  $("email").focus();
 }
 function showLogin(message = "", clear = true) { resetReading(); resetVocabulary(); resetProgress(); resetHomeDashboard(); clearCurrentConversation(); appState.currentUser = null; appState.profile = null; appState.conversationCount = null; onboardingDeferredForSession = false; scenarioCatalog = []; if (clear) clearSession(); loginView.hidden = false; appView.hidden = true; showAuthMode("login"); setMessage("message", message); }
 function validConversation(conversation) {
@@ -333,6 +367,48 @@ async function loginLocal(event) {
     saveTokens(result.body); await showHome();
   } catch (_) { setMessage("message", "Não foi possível conectar ao servidor."); } finally { button.disabled = false; setButtonBusy(button, false); }
 }
+function passwordResetError(result) {
+  if (result.networkError) return "Não foi possível conectar ao servidor.";
+  if (result.response.status === 429) return "Muitas tentativas. Aguarde antes de tentar novamente.";
+  if (result.response.status === 400) {
+    const errors = result.body?.errors || {};
+    if (errors.email) return "Informe um e-mail válido.";
+    if (errors.code) return "Informe um código de 6 dígitos.";
+    if (errors.newPassword) return "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.";
+    return "Código incorreto ou expirado.";
+  }
+  return "Não foi possível alterar a senha.";
+}
+async function requestPasswordReset(event) {
+  event.preventDefault();
+  const button = $("forgot-request-submit"), input = $("forgot-email"), email = input.value.trim();
+  setMessage("forgot-password-message");
+  if (button.disabled) return;
+  if (!email || input.validity?.valid === false) return setMessage("forgot-password-message", "Informe um e-mail válido.");
+  button.disabled = true; setButtonBusy(button, true); button.textContent = "Enviando...";
+  try {
+    const result = await request("/api/v1/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+    if (!result.response.ok) return setMessage("forgot-password-message", passwordResetError(result));
+    pendingPasswordResetEmail = email; $("forgot-email").value = ""; showAuthMode("forgot-reset"); setMessage("forgot-password-message", "Se o e-mail estiver cadastrado, enviaremos um código de recuperação.", true);
+  } catch (_) { setMessage("forgot-password-message", "Não foi possível conectar ao servidor."); }
+  finally { button.disabled = false; setButtonBusy(button, false); button.textContent = "Enviar código"; }
+}
+async function resetPassword(event) {
+  event.preventDefault();
+  const button = $("forgot-reset-submit"), code = $("forgot-code").value.trim(), password = $("forgot-new-password").value, confirmation = $("forgot-password-confirm").value;
+  setMessage("forgot-password-message");
+  if (button.disabled) return;
+  if (!/^\d{6}$/.test(code)) return setMessage("forgot-password-message", "Informe um código de 6 dígitos.");
+  if (password.length < 6 || password.length > 100 || registrationPasswordBytes(password) > 72) return setMessage("forgot-password-message", "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.");
+  if (password !== confirmation) return setMessage("forgot-password-message", "As senhas não coincidem.");
+  button.disabled = true; setButtonBusy(button, true); button.textContent = "Alterando...";
+  try {
+    const result = await request("/api/v1/auth/reset-password", { method: "POST", body: JSON.stringify({ email: pendingPasswordResetEmail, code, newPassword: password }) });
+    if (!result.response.ok) return setMessage("forgot-password-message", passwordResetError(result));
+    $("forgot-code").value = ""; $("forgot-new-password").value = ""; $("forgot-password-confirm").value = ""; pendingPasswordResetEmail = ""; showAuthMode("forgot-success"); setMessage("forgot-password-message", "Senha alterada com sucesso. Entre novamente com sua nova senha.", true);
+  } catch (_) { setMessage("forgot-password-message", "Não foi possível conectar ao servidor."); }
+  finally { button.disabled = false; setButtonBusy(button, false); button.textContent = "Alterar senha"; }
+}
 async function showHome({ preserveManualAuthNavigation = false } = {}) { const navigationVersion = authNavigationVersion, state=await loadCurrentUser(); if(state.kind!=="user"){if(preserveManualAuthNavigation&&navigationVersion!==authNavigationVersion)return;if(state.kind==="none")showLogin();else if(state.kind==="expired")showLogin("Sua sessão expirou. Entre novamente.");else showLogin("Não foi possível conectar ao servidor.",false);return;} const user=state.user; clearCurrentConversation(); appState.conversationNavigationContext=null; if(appState.currentUser?.id!==user.id){resetVocabulary();resetProgress();resetHomeDashboard();onboardingDeferredForSession=false;} appState.currentUser=user; try{await loadGlobalProfile();}catch(_){setMessage("profile-status","Não foi possível carregar o perfil.");} loginView.hidden=true;appView.hidden=false;$("skip-link").setAttribute("href","#main-content");["username","header-username","account-name"].forEach(id=>{const el=$(id);if(el)el.textContent=user.username||"";});["account-email"].forEach(id=>{const el=$(id);if(el)el.textContent=user.email||"";});const verified=user.emailVerified===true?"Sim":user.emailVerified===false?"Não":"Não informado";const verifiedEl=$("account-verified");if(verifiedEl)verifiedEl.textContent=verified;showView("home");renderOnboardingOffer(appState.profile);loadHomeDashboard();}
 
 async function runAi({ buttonId, statusId, path, body, onSuccess, loading }) {
@@ -359,6 +435,7 @@ applySidebarState();
 $("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout")?.addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
 $("register-form").addEventListener("submit", registerLocal); $("show-register").addEventListener("click", () => { authNavigationVersion++; showAuthMode("register"); $("register-username").focus(); }); $("show-login").addEventListener("click", () => { authNavigationVersion++; showAuthMode("login"); $("email").focus(); });
 $("verification-form").addEventListener("submit", verifyEmail); $("resend-verification").addEventListener("click", resendVerification); $("verification-back-login").addEventListener("click", () => showAuthMode("login"));
+$("forgot-request-form").addEventListener("submit", requestPasswordReset); $("forgot-reset-form").addEventListener("submit", resetPassword); $("show-forgot-password").addEventListener("click", openForgotPassword); $("forgot-back-login").addEventListener("click", returnToLoginFromPasswordReset);
 $("translation-text").addEventListener("input", () => $("translation-count").textContent = $("translation-text").value.length); $("record-chat").addEventListener("click", toggleRecording); $("record-translation").addEventListener("click", () => toggleRecording(toolRecordingConfig("translation"))); $("record-correction").addEventListener("click", () => toggleRecording(toolRecordingConfig("correction"))); $("speak-translation").addEventListener("click", () => playSpeech($("speak-translation"), $("translation-speech-status"), $("translation-result").value, $("target-language").value, false, undefined, false)); $("speak-correction").addEventListener("click", () => playSpeech($("speak-correction"), $("correction-speech-status"), $("corrected-result").value, "en", false, undefined, false)); $("correction-text").addEventListener("input", () => $("correction-count").textContent = $("correction-text").value.length); $("swap-languages").addEventListener("click", () => { const a = $("source-language"), b = $("target-language"), value = a.value; a.value = b.value; b.value = value; });
 function chatMessageAvatar(role) {
   if (role === "assistant") {
