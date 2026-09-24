@@ -26,10 +26,14 @@ public class SecurityConfig {
 
     @Bean
     CorsConfigurationSource corsConfigurationSource(
-            @Value("${APP_CORS_ALLOWED_ORIGINS:http://localhost:5500,http://localhost:5501}") String allowedOrigins) {
+            @Value("${APP_CORS_ALLOWED_ORIGINS:http://localhost:5500,http://127.0.0.1:5500,http://localhost:5501}")
+            String allowedOrigins
+    ) {
         var configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Content-Type", "Authorization"));
         configuration.setAllowCredentials(false);
@@ -52,7 +56,6 @@ public class SecurityConfig {
 
         http
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
-                
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
@@ -74,19 +77,13 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/login",
-                                "/api/v1/auth/refresh"
-                                ,
+                                "/api/v1/auth/refresh",
                                 "/api/v1/auth/logout",
-                                "/api/v1/auth/verify-email"
-                                ,
-                                "/api/v1/auth/resend-verification"
-                                ,
-                                "/api/v1/auth/forgot-password"
-                                ,
-                                "/api/v1/auth/reset-password"
-                                ,
-                                "/api/v1/auth/google"
-                                ,
+                                "/api/v1/auth/verify-email",
+                                "/api/v1/auth/resend-verification",
+                                "/api/v1/auth/forgot-password",
+                                "/api/v1/auth/reset-password",
+                                "/api/v1/auth/google",
                                 "/api/v1/auth/google/nonce"
                         ).permitAll()
 
