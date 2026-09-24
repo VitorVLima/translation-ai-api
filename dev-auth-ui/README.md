@@ -39,7 +39,7 @@ A configuração explícita tem prioridade e permite apontar uma interface hospe
 - **Praticar:** hub para conversação, leitura, vocabulário, tradução e correção.
 - **Conta:** login local, login Google quando configurado, cadastro, confirmação de e-mail por código, reenvio de código e logout.
 
-A confirmação de e-mail desta interface usa código de seis dígitos, não link. Os endpoints de recuperação e redefinição de senha existem no Backend, mas ainda não possuem fluxo visual nesta interface.
+A confirmação de e-mail desta interface usa código de seis dígitos, não link. A tela de login também oferece a ação **"Esqueci minha senha"**: o usuário solicita a recuperação por e-mail, informa o código enviado pelo Backend por meio do provedor de e-mail configurado, define uma nova senha e retorna ao login após a confirmação. O fluxo não realiza login automático após o reset.
 
 ## Interface e acessibilidade
 
