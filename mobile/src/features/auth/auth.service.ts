@@ -91,9 +91,16 @@ export async function refreshSession(request: RefreshRequest): Promise<TokenPair
   if (response.status === 429) throw new RefreshError('rateLimit');
   if (response.status !== 200) throw new RefreshError('unexpected');
 
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    // A conexão também pode cair depois dos headers, durante a leitura do body.
+    throw new RefreshError('network');
+  }
   let result: unknown;
   try {
-    result = await response.json();
+    result = JSON.parse(body);
   } catch {
     throw new RefreshError('invalidResponse');
   }
