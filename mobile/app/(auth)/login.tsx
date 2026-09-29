@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { login, LoginError } from './src/features/auth/auth.service';
-import { establishSession, getSession, restoreSession, SessionError, subscribeToSessionInvalidation } from './src/features/auth/auth.session';
-import { authenticatedFetch } from './src/api/authenticated-fetch';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { login, LoginError } from '../../src/features/auth/auth.service';
+import { establishSession } from '../../src/features/auth/auth.session';
+import { useAuthNavigation } from '../../src/features/auth/auth-navigation';
 
 function getEmailError(value: string) {
   const trimmedEmail = value.trim();
@@ -13,86 +13,16 @@ function getEmailError(value: string) {
   return '';
 }
 
-export default function App() {
-  const [sessionStatus, setSessionStatus] = useState<'restoring' | 'authenticated' | 'unauthenticated'>('restoring');
+export default function LoginScreen() {
+  const { loginNotice, completeLogin } = useAuthNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [loginError, setLoginError] = useState('');
+  const [loginError, setLoginError] = useState(loginNotice);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isCheckingSession, setIsCheckingSession] = useState(false);
-  const [sessionCheckMessage, setSessionCheckMessage] = useState('');
   const submittingRef = useRef(false);
-  const checkingSessionRef = useRef(false);
-
-  useEffect(() => {
-    let active = true;
-    const unsubscribe = subscribeToSessionInvalidation(() => {
-      if (!active) return;
-      setPassword('');
-      setShowPassword(false);
-      setSessionCheckMessage('');
-      setLoginError('Sua sessão não está disponível. Entre novamente.');
-      setSessionStatus('unauthenticated');
-    });
-    restoreSession()
-      .then((result) => {
-        if (!active) return;
-        if (result.status === 'authenticated') {
-          setSessionStatus('authenticated');
-        } else {
-          if (result.status === 'unavailable') {
-            setLoginError('Não foi possível restaurar sua sessão agora. Você pode entrar novamente.');
-          }
-          setSessionStatus('unauthenticated');
-        }
-      })
-      .catch(() => {
-        if (!active) return;
-        setLoginError('Não foi possível restaurar sua sessão agora. Você pode entrar novamente.');
-        setSessionStatus('unauthenticated');
-      });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
-
-  async function handleCheckSession() {
-    if (checkingSessionRef.current) return;
-    const checkedSession = getSession();
-    checkingSessionRef.current = true;
-    setIsCheckingSession(true);
-    setSessionCheckMessage('');
-    try {
-      // Duas chamadas protegidas permitem verificar single-flight em desenvolvimento.
-      const results = await Promise.allSettled([
-        authenticatedFetch('/api/v1/users/me'),
-        authenticatedFetch('/api/v1/users/me'),
-      ]);
-      if (getSession() !== checkedSession) return;
-      const failure = results.find((result) => result.status === 'rejected');
-      if (failure?.status === 'rejected') {
-        const error: unknown = failure.reason;
-        if (error instanceof SessionError && error.kind === 'network') {
-          setSessionCheckMessage('Não foi possível conectar. Verifique sua conexão e reabra o app para tentar novamente.');
-        } else if (error instanceof SessionError && error.kind === 'rateLimit') {
-          setSessionCheckMessage('Muitas tentativas. Aguarde antes de reabrir o app.');
-        } else {
-          setSessionCheckMessage('Não foi possível verificar a sessão agora. Reabra o app para tentar novamente.');
-        }
-      } else if (results.every((result) => result.status === 'fulfilled' && result.value.status === 200)) {
-        setSessionCheckMessage('Sessão verificada.');
-      } else {
-        setSessionCheckMessage('Não foi possível concluir a verificação agora.');
-      }
-    } finally {
-      checkingSessionRef.current = false;
-      setIsCheckingSession(false);
-    }
-  }
 
   async function handleLoginPress() {
     if (submittingRef.current) return;
@@ -112,8 +42,7 @@ export default function App() {
       await establishSession(response);
       setPassword('');
       setShowPassword(false);
-      setSessionCheckMessage('');
-      setSessionStatus('authenticated');
+      completeLogin();
       Alert.alert('Login realizado com sucesso.');
     } catch (error) {
       if (error instanceof LoginError) {
@@ -145,40 +74,6 @@ export default function App() {
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }
-
-  if (sessionStatus === 'restoring') {
-    return (
-      <View style={styles.sessionScreen}>
-        <ActivityIndicator color="#5b50f5" accessibilityLabel="Restaurando sessão" />
-        <Text style={styles.sessionText}>Verificando sua sessão...</Text>
-        <StatusBar style="dark" />
-      </View>
-    );
-  }
-
-  if (sessionStatus === 'authenticated') {
-    return (
-      <View style={styles.sessionScreen}>
-        <Text accessibilityRole="header" style={styles.sessionTitle}>English<Text style={styles.brandAccent}>AI</Text></Text>
-        <Text style={styles.sessionText}>Sessão autenticada.</Text>
-        {__DEV__ && (
-          <>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: isCheckingSession, busy: isCheckingSession }}
-              disabled={isCheckingSession}
-              onPress={handleCheckSession}
-              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            >
-              <Text style={styles.buttonText}>{isCheckingSession ? 'Verificando...' : 'Verificar sessão'}</Text>
-            </Pressable>
-            {sessionCheckMessage ? <Text accessibilityLiveRegion="polite" style={styles.sessionText}>{sessionCheckMessage}</Text> : null}
-          </>
-        )}
-        <StatusBar style="dark" />
-      </View>
-    );
   }
 
   return (
@@ -307,7 +202,7 @@ export default function App() {
           >
             <Image
               accessible={false}
-              source={require('./assets/google-g.png')}
+              source={require('../../assets/google-g.png')}
               style={styles.googleLogo}
             />
             <Text style={styles.googleButtonText}>Continuar com Google</Text>
@@ -332,24 +227,6 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  sessionScreen: {
-    alignItems: 'center',
-    backgroundColor: '#f8f9ff',
-    flex: 1,
-    gap: 12,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  sessionTitle: {
-    color: '#141326',
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  sessionText: {
-    color: '#4e5871',
-    fontSize: 15,
-    textAlign: 'center',
-  },
   screen: {
     flex: 1,
     backgroundColor: '#f8f9ff',
