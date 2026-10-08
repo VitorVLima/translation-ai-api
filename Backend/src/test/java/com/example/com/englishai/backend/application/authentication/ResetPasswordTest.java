@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.application.authentication;
 
 import com.example.com.englishai.backend.application.authentication.exception.InvalidPasswordResetCodeException;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
 import com.example.com.englishai.backend.application.ports.*;
 import com.example.com.englishai.backend.domain.authentication.PasswordResetCode;
 import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamilyRevocationReason;
@@ -10,9 +11,11 @@ import org.junit.jupiter.api.Test;
 import java.time.*;
 import java.util.*;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 class ResetPasswordTest {
     private final UserRepository users = mock(UserRepository.class);
@@ -26,7 +29,7 @@ class ResetPasswordTest {
     @Test
     void validCodeChangesPasswordConsumesCodeAndRevokesSessions() {
         UUID userId = UUID.randomUUID();
-        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), true);
+        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), false);
         PasswordResetCode code = new PasswordResetCode(UUID.randomUUID(), userId, "expected", at("11:50"), at("13:00"), null, null, 0, 5);
         when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
         when(codes.findByUserIdForUpdate(userId)).thenReturn(List.of(code));
@@ -36,15 +39,50 @@ class ResetPasswordTest {
         reset.execute("user@example.com", "482731", "NewPass123");
 
         verify(passwords).encode("NewPass123");
-        verify(users).save(argThat(u -> u.getPasswordHash().equals("new-hash")));
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(users).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getPasswordHash()).isEqualTo("new-hash");
+        assertThat(userCaptor.getValue().isEmailVerified()).isTrue();
         verify(codes).save(argThat(c -> c.getUsedAt().equals(at("12:00"))));
         verify(families).revokeAllByUserId(userId, at("12:00"), RefreshTokenFamilyRevocationReason.PASSWORD_RESET);
     }
 
     @Test
+    void validatingCorrectCodeDoesNotConsumeItOrChangePassword() {
+        UUID userId = UUID.randomUUID();
+        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), false);
+        PasswordResetCode code = new PasswordResetCode(UUID.randomUUID(), userId, "expected", at("11:50"), at("13:00"), null, null, 0, 5);
+        when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
+        when(codes.findByUserIdForUpdate(userId)).thenReturn(List.of(code));
+        when(hasher.hash("482731")).thenReturn("expected");
+
+        reset.validateCode("user@example.com", "482731");
+
+        verify(codes, never()).save(any());
+        verify(users, never()).save(any());
+        verifyNoInteractions(passwords, families);
+    }
+
+    @Test
+    void validatingWrongCodeCountsAnAttemptWithoutChangingPassword() {
+        UUID userId = UUID.randomUUID();
+        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), false);
+        PasswordResetCode code = new PasswordResetCode(UUID.randomUUID(), userId, "expected", at("11:50"), at("13:00"), null, null, 0, 5);
+        when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
+        when(codes.findByUserIdForUpdate(userId)).thenReturn(List.of(code));
+        when(hasher.hash("111111")).thenReturn("other");
+
+        assertThatThrownBy(() -> reset.validateCode("user@example.com", "111111"))
+                .isExactlyInstanceOf(InvalidPasswordResetCodeException.class);
+        verify(codes).save(argThat(c -> c.getAttempts() == 1));
+        verify(users, never()).save(any());
+        verifyNoInteractions(passwords, families);
+    }
+
+    @Test
     void wrongCodeIncrementsAttemptsWithoutChangingPassword() {
         UUID userId = UUID.randomUUID();
-        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), true);
+        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), false);
         PasswordResetCode code = new PasswordResetCode(UUID.randomUUID(), userId, "expected", at("11:50"), at("13:00"), null, null, 0, 5);
         when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
         when(codes.findByUserIdForUpdate(userId)).thenReturn(List.of(code));
@@ -52,6 +90,7 @@ class ResetPasswordTest {
         assertThatThrownBy(() -> reset.execute("user@example.com", "111111", "NewPass123"))
                 .isExactlyInstanceOf(InvalidPasswordResetCodeException.class);
         verify(codes).save(argThat(c -> c.getAttempts() == 1));
+        verify(users, never()).save(any());
         verifyNoInteractions(passwords, families);
     }
 
@@ -66,13 +105,38 @@ class ResetPasswordTest {
     @Test
     void expiredCodeIsRejectedWithoutChangingPassword() {
         UUID userId = UUID.randomUUID();
-        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), true);
+        User user = new User(userId, "user@example.com", "user", "old-hash", at("11:00"), at("11:00"), false);
         PasswordResetCode code = new PasswordResetCode(UUID.randomUUID(), userId, "expected", at("10:00"), at("12:00"), null, null, 0, 5);
         when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
         when(codes.findByUserIdForUpdate(userId)).thenReturn(List.of(code));
         assertThatThrownBy(() -> reset.execute("user@example.com", "482731", "NewPass123"))
                 .isExactlyInstanceOf(InvalidPasswordResetCodeException.class);
+        verify(users, never()).save(any());
         verifyNoInteractions(hasher, passwords, families);
+    }
+
+    @Test
+    void googleOnlyAccountCannotUseResetToCreateLocalPassword() {
+        User user = new User(UUID.randomUUID(), "google@example.com", "google", null,
+                at("11:00"), at("11:00"), true);
+        when(users.findByEmailForUpdate("google@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> reset.execute("google@example.com", "482731", "NewPass123"))
+                .isExactlyInstanceOf(InvalidPasswordResetCodeException.class);
+
+        verifyNoInteractions(codes, hasher, passwords, families);
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void ambiguousLegacyEmailCannotUseReset() {
+        when(users.findByEmailForUpdate("user@example.com")).thenThrow(new AmbiguousEmailAddressException());
+
+        assertThatThrownBy(() -> reset.execute("USER@EXAMPLE.COM", "482731", "NewPass123"))
+                .isExactlyInstanceOf(InvalidPasswordResetCodeException.class);
+
+        verifyNoInteractions(codes, hasher, passwords, families);
+        verify(users, never()).save(any());
     }
 
     private static OffsetDateTime at(String time) { return OffsetDateTime.parse("2026-01-01T" + time + ":00Z"); }

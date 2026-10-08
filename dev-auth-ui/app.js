@@ -289,7 +289,7 @@ function showView(name) {
   appState.currentView = name;
   if (name === "reading") prepareReading();
   if (name === "vocabulary") loadVocabulary().catch(() => { loadingOperations.get("vocabulary-loading")?.finish(); setMessage("vocabulary-status", "Não foi possível carregar o vocabulário."); });
-  if (name === "progress") loadProgress().catch(error => { console.error("[Progress] load failed", error); setMessage("progress-status", "Não foi possível carregar seu progresso."); });
+  if (name === "progress") loadProgress().catch(() => { console.error("[Progress] load failed"); setMessage("progress-status", "Não foi possível carregar seu progresso."); });
   document.querySelectorAll(".page-view").forEach(v => v.hidden = v.id !== `view-${name}`);
   const activeView = name === "chat" ? appState.conversationNavigationContext === "history" ? "conversations" : "scenarios" : name;
   const practiceViews = ["scenarios", "reading", "vocabulary", "translate", "correct"];
@@ -433,7 +433,7 @@ $("sidebar-toggle")?.addEventListener("click", () => { appState.sidebarCollapsed
 $("profile-header-link").addEventListener("click", () => { showView("profile"); loadProfileArea(); });
 applySidebarState();
 $("login-form").addEventListener("submit", loginLocal); $("chat-form").addEventListener("submit", sendChatStream); $("chat-message").addEventListener("input", () => $("chat-count").textContent = $("chat-message").value.length); $("chat-message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chat-form").requestSubmit(); } }); $("logout").addEventListener("click", logout); $("account-logout")?.addEventListener("click", logout); $("translate").addEventListener("click", translate); $("correct").addEventListener("click", correct);
-$("register-form").addEventListener("submit", registerLocal); $("show-register").addEventListener("click", () => { authNavigationVersion++; showAuthMode("register"); $("register-username").focus(); }); $("show-login").addEventListener("click", () => { authNavigationVersion++; showAuthMode("login"); $("email").focus(); });
+$("register-form").addEventListener("submit", registerLocal); $("show-register").addEventListener("click", () => { authNavigationVersion++; showAuthMode("register"); $("register-email").focus(); }); $("show-login").addEventListener("click", () => { authNavigationVersion++; showAuthMode("login"); $("email").focus(); });
 $("verification-form").addEventListener("submit", verifyEmail); $("resend-verification").addEventListener("click", resendVerification); $("verification-back-login").addEventListener("click", () => showAuthMode("login"));
 $("forgot-request-form").addEventListener("submit", requestPasswordReset); $("forgot-reset-form").addEventListener("submit", resetPassword); $("show-forgot-password").addEventListener("click", openForgotPassword); $("forgot-back-login").addEventListener("click", returnToLoginFromPasswordReset);
 $("translation-text").addEventListener("input", () => $("translation-count").textContent = $("translation-text").value.length); $("record-chat").addEventListener("click", toggleRecording); $("record-translation").addEventListener("click", () => toggleRecording(toolRecordingConfig("translation"))); $("record-correction").addEventListener("click", () => toggleRecording(toolRecordingConfig("correction"))); $("speak-translation").addEventListener("click", () => playSpeech($("speak-translation"), $("translation-speech-status"), $("translation-result").value, $("target-language").value, false, undefined, false)); $("speak-correction").addEventListener("click", () => playSpeech($("speak-correction"), $("correction-speech-status"), $("corrected-result").value, "en", false, undefined, false)); $("correction-text").addEventListener("input", () => $("correction-count").textContent = $("correction-text").value.length); $("swap-languages").addEventListener("click", () => { const a = $("source-language"), b = $("target-language"), value = a.value; a.value = b.value; b.value = value; });
@@ -465,12 +465,10 @@ function registrationError(result) {
   if (result.response.status === 409) {
     const message = result.body?.message;
     if (message === "Email already exists") return "Este e-mail já está em uso.";
-    if (message === "Username already exists") return "Este nome de usuário já está em uso.";
   }
   if (result.response.status === 400) {
     const errors = result.body?.errors || {};
     if (errors.email) return "Informe um e-mail válido.";
-    if (errors.username) return "O nome de usuário deve ter entre 3 e 100 caracteres.";
     if (errors.password) return "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.";
   }
   if (result.response.status === 429) return "Muitas solicitações. Tente novamente em instantes.";
@@ -482,16 +480,15 @@ function maskEmail(email) {
 }
 async function registerLocal(event) {
   event.preventDefault();
-  const button = $("register-submit"), username = $("register-username").value.trim(), emailInput = $("register-email"), email = emailInput.value.trim(), password = $("register-password").value, confirmation = $("register-password-confirm").value;
+  const button = $("register-submit"), emailInput = $("register-email"), email = emailInput.value.trim(), password = $("register-password").value, confirmation = $("register-password-confirm").value;
   if (button.disabled) return;
   setMessage("register-message");
-  if (!username || username.length < 3 || username.length > 100) return setMessage("register-message", "O nome de usuário deve ter entre 3 e 100 caracteres.");
   if (!email || emailInput.validity?.valid === false) return setMessage("register-message", "Informe um e-mail válido.");
   if (password.length < 6 || password.length > 100 || registrationPasswordBytes(password) > 72) return setMessage("register-message", "A senha deve ter entre 6 e 100 caracteres e no máximo 72 bytes.");
   if (password !== confirmation) return setMessage("register-message", "As senhas não coincidem.");
   button.disabled = true; setButtonBusy(button, true); button.textContent = "Criando conta...";
   try {
-    const result = await request("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ email, username, password }) });
+    const result = await request("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ email, password }) });
     if (!result.response.ok) return setMessage("register-message", registrationError(result));
     $("register-form").reset?.(); loginView.hidden = false; appView.hidden = true; openVerification(email, { startCooldown: true });
   } catch (_) { setMessage("register-message", "Não foi possível conectar ao servidor."); }
@@ -567,7 +564,7 @@ function renderProgressVocabularyChart(container, vocabulary) {
   let start = 0; const stops = entries.map(entry => { const end = start + entry.value / total * 100; const stop = `${entry.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`; start = end; return stop; }).join(", ");
   const legend = entries.map(entry => `<li><i style="--legend-color:${entry.color}" aria-hidden="true"></i><span>${entry.label}</span><strong>${entry.value} (${Math.round(entry.value / total * 100)}%)</strong></li>`).join("");
   const label = `Estado do vocabulário: ${entries.map(entry => `${entry.label} ${entry.value}`).join(", ")}`;
-  progressChart(container, `<div class="progress-donut-chart"><div class="progress-donut" style="--progress-donut:conic-gradient(${stops})"><strong>${vocabulary?.totalWords ?? total}</strong><span>palavras</span></div><ul>${legend}</ul></div>`, label);
+  progressChart(container, `<div class="progress-donut-chart"><div class="progress-donut" style="--progress-donut:conic-gradient(${stops})"><strong>${progressChartText(vocabulary?.totalWords ?? total)}</strong><span>palavras</span></div><ul>${legend}</ul></div>`, label);
 }
 function renderProgressEvolutionChart(container, points) {
   const series = [{ key: "conversationCount", color: "#5b50f5", name: "Conversas" }, { key: "readingCount", color: "#36a3e8", name: "Leituras" }, { key: "wordsFirstSeen", color: "#41ae83", name: "Novas palavras" }];
@@ -616,7 +613,7 @@ async function loadProgress() {
   progressElement("progress-status"); const content=progressElement("progress-content"); const finishLoading=startLoading("progress-loading"); setMessage("progress-status"); content.hidden=true;
   let main, timeline;
   try { [main,timeline]=await Promise.all([authenticatedRequest(`/api/v1/progress?period=${period}`,{signal:controller.signal}),authenticatedRequest("/api/v1/progress/timeline",{signal:controller.signal})]); }
-  catch(error){ if(current()&&error?.name!=="AbortError"){console.error("[Progress] request failed", error);setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente.");} return; }
+  catch(error){ if(current()&&error?.name!=="AbortError"){console.error("[Progress] request failed");setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente.");} return; }
   if(!current()){ finishLoading(); return; }
   if(main.response.status===401||timeline.response.status===401) return showLogin("Sua sessão expirou. Entre novamente.");
   if(!main.response.ok||!timeline.response.ok) { finishLoading(); return setMessage("progress-status",errorMessage(main.response.status)); }
@@ -624,7 +621,7 @@ async function loadProgress() {
     renderProgress({...main.body,timeline:timeline.body});
     finishLoading();
     setMessage("progress-status");
-  } catch(error) { if(current()){ console.error("[Progress] render failed", error); setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente."); } }
+  } catch { if(current()){ console.error("[Progress] render failed"); setMessage("progress-status","Não foi possível carregar seu progresso. Tente novamente."); } }
   finally { finishLoading(); if(progressRequest===controller)progressRequest=null; }
 }
 document.querySelectorAll?.(".progress-period").forEach(button=>button.addEventListener("click",()=>{progressPeriod=button.dataset.period || "ALL_TIME";document.querySelectorAll(".progress-period").forEach(other=>other.classList.toggle("active",other===button));loadProgress();}));

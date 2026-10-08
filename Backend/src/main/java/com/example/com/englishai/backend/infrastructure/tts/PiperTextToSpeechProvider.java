@@ -14,6 +14,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import jakarta.annotation.PreDestroy;
 import com.example.com.englishai.backend.application.tts.TtsVoice;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -21,15 +26,26 @@ public class PiperTextToSpeechProvider implements TextToSpeechProvider {
     private final String endpoint;
     private final HttpClient client;
     private final Duration responseTimeout;
+    private final int maxAudioBytes;
+    private final ScheduledExecutorService readDeadline = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        var thread = new Thread(runnable, "piper-read-deadline");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final JsonMapper jsonMapper = new JsonMapper();
 
     public PiperTextToSpeechProvider(String baseUrl, Duration connectTimeout, Duration responseTimeout) {
+        this(baseUrl, connectTimeout, responseTimeout, 20 * 1024 * 1024);
+    }
+    public PiperTextToSpeechProvider(String baseUrl, Duration connectTimeout, Duration responseTimeout, int maxAudioBytes) {
         if (baseUrl == null || baseUrl.isBlank()) throw new IllegalArgumentException("PIPER_BASE_URL is required");
         if (connectTimeout == null || responseTimeout == null || connectTimeout.isNegative() || connectTimeout.isZero() || responseTimeout.isNegative() || responseTimeout.isZero())
             throw new IllegalArgumentException("TTS timeouts must be positive");
         endpoint = baseUrl.replaceAll("/+$", "") + "/synthesize";
         client = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
         this.responseTimeout = responseTimeout;
+        if (maxAudioBytes < 1) throw new IllegalArgumentException("TTS audio limit must be positive");
+        this.maxAudioBytes = maxAudioBytes;
     }
 
     @Override
@@ -38,15 +54,31 @@ public class PiperTextToSpeechProvider implements TextToSpeechProvider {
     }
     private TextToSpeechResult synthesizeMeasured(TextToSpeechRequest request) {
         try {
+            long started = System.nanoTime();
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
                     .version(HttpClient.Version.HTTP_1_1).timeout(responseTimeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json(request), StandardCharsets.UTF_8)).build();
-            HttpResponse<byte[]> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<java.io.InputStream> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
             String contentType = response.headers().firstValue("Content-Type").orElse("");
-            if (response.statusCode() < 200 || response.statusCode() >= 300 || response.body() == null || response.body().length == 0 || !contentType.toLowerCase(java.util.Locale.ROOT).startsWith("audio/wav"))
-                throw new TextToSpeechProviderException("Piper service returned an invalid response");
-            return new TextToSpeechResult(response.body(), "audio/wav");
+            try (var body = response.body()) {
+                if (response.statusCode() < 200 || response.statusCode() >= 300 || body == null
+                        || !contentType.toLowerCase(java.util.Locale.ROOT).startsWith("audio/wav")
+                        || response.headers().firstValueAsLong("Content-Length").orElse(0) > maxAudioBytes)
+                    throw new TextToSpeechProviderException("Piper service returned an invalid response");
+                var timedOut = new AtomicBoolean();
+                long remaining = Math.max(1, responseTimeout.toNanos() - (System.nanoTime() - started));
+                var deadline = readDeadline.schedule(() -> {
+                    timedOut.set(true);
+                    try { body.close(); } catch (IOException ignored) { }
+                }, remaining, TimeUnit.NANOSECONDS);
+                try {
+                    byte[] audio = body.readNBytes(maxAudioBytes + 1);
+                    if (timedOut.get() || audio.length == 0 || audio.length > maxAudioBytes)
+                        throw new TextToSpeechProviderException("Piper service returned an invalid or oversized response");
+                    return new TextToSpeechResult(audio, "audio/wav");
+                } finally { deadline.cancel(false); }
+            }
         } catch (TextToSpeechProviderException e) { throw e;
         } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new TextToSpeechProviderException("Piper service request interrupted", e);
         } catch (IOException | RuntimeException e) { throw new TextToSpeechProviderException("Piper service request failed", e); }
@@ -79,4 +111,5 @@ public class PiperTextToSpeechProvider implements TextToSpeechProvider {
         }
     }
     private static String quote(String value) { return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t") + "\""; }
+    @PreDestroy public void close() { readDeadline.shutdownNow(); client.close(); }
 }

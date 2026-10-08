@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import com.example.com.englishai.backend.infrastructure.security.SseStreamExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.http.ResponseEntity;
@@ -19,9 +19,15 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/chat")
 public class ConversationController {
     private final ChatWithTutor chatWithTutor;
+    private final SseStreamExecutor streams;
+    private final long streamTimeoutMs;
     @Value("${ai.llm.provider:ollama}")
     private String metricProvider = "unknown";
-    public ConversationController(ChatWithTutor chatWithTutor) { this.chatWithTutor = chatWithTutor; }
+    public ConversationController(ChatWithTutor chatWithTutor, SseStreamExecutor streams,
+            @Value("${AI_SSE_TIMEOUT_MS:130000}") long streamTimeoutMs) {
+        if (streamTimeoutMs < 1) throw new IllegalArgumentException("SSE timeout must be positive");
+        this.chatWithTutor = chatWithTutor; this.streams = streams; this.streamTimeoutMs = streamTimeoutMs;
+    }
     @PostMapping
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
         var result = chatWithTutor.execute(toCommand(request));
@@ -32,11 +38,11 @@ public class ConversationController {
         var command = toCommand(request);
         chatWithTutor.validateRequest(command);
         if (!chatWithTutor.streamingAvailable()) throw new com.example.com.englishai.backend.application.llm.LlmProviderException("Streaming is not supported by the configured provider");
-        var emitter = new SseEmitter(130_000L);
+        var emitter = new SseEmitter(streamTimeoutMs);
         var metric = AiMetrics.start(AiMetrics.Operation.CHAT_TOTAL, AiMetrics.provider(metricProvider));
         emitter.onTimeout(() -> metric.finish(AiMetrics.Status.TIMEOUT));
         emitter.onError(error -> metric.finish(AiMetrics.Status.ERROR));
-        CompletableFuture.runAsync(() -> {
+        streams.start(emitter, () -> {
             try {
                 var result = chatWithTutor.stream(command, chunk -> {
                     send(emitter, "token", "{\"text\":" + jsonString(chunk) + "}");

@@ -40,4 +40,20 @@ class SmtpEmailSenderTest {
                 .isExactlyInstanceOf(EmailDeliveryException.class)
                 .hasMessage("Email delivery failed");
     }
+
+    @Test
+    void passwordResetEmailUsesItsOwnSubjectAndInstructions() {
+        JavaMailSender mail = mock(JavaMailSender.class);
+        SmtpEmailSender sender = new SmtpEmailSender(mail, "no-reply@englishai.test");
+
+        sender.sendPasswordResetCode("person@example.com", "482731");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mail).send(captor.capture());
+        SimpleMailMessage message = captor.getValue();
+        assertThat(message.getTo()).containsExactly("person@example.com");
+        assertThat(message.getSubject()).isEqualTo("EnglishAI - Recuperação de senha");
+        assertThat(message.getText()).contains("482731", "redefinir a senha");
+        assertThat(message.getText()).doesNotContain("cadastro");
+    }
 }

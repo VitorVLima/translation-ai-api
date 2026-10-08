@@ -20,13 +20,14 @@ class VocabularyReviewSchedulerTest {
         var fourth = scheduler.record(third.status(), third.stage(), true);
         var fifth = scheduler.record(fourth.status(), fourth.stage(), true);
 
-        assertThat(first.status()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(first.status()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(first.stage()).isEqualTo(1);
         assertThat(first.nextReviewAt()).isEqualTo(Instant.parse("2026-09-17T12:00:00Z").atOffset(ZoneOffset.UTC));
         assertThat(second.status()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(second.stage()).isEqualTo(2);
         assertThat(second.nextReviewAt()).isEqualTo(Instant.parse("2026-09-19T12:00:00Z").atOffset(ZoneOffset.UTC));
         assertThat(third.nextReviewAt()).isEqualTo(Instant.parse("2026-09-23T12:00:00Z").atOffset(ZoneOffset.UTC));
+        assertThat(fourth.status()).isEqualTo(VocabularyService.ProgressStatus.LEARNED);
         assertThat(fourth.nextReviewAt()).isEqualTo(Instant.parse("2026-09-30T12:00:00Z").atOffset(ZoneOffset.UTC));
         assertThat(fifth.status()).isEqualTo(VocabularyService.ProgressStatus.MASTERED);
         assertThat(fifth.stage()).isEqualTo(5);
@@ -35,14 +36,14 @@ class VocabularyReviewSchedulerTest {
 
     @Test
     void incorrectEvidenceBringsTheStageCloserWithoutErasingHistory() {
-        var learningError = scheduler.record(VocabularyService.ProgressStatus.LEARNING, 1, false);
-        var reviewingError = scheduler.record(VocabularyService.ProgressStatus.REVIEWING, 3, false);
+        var reviewingError = scheduler.record(VocabularyService.ProgressStatus.REVIEWING, 1, false);
+        var learnedError = scheduler.record(VocabularyService.ProgressStatus.LEARNED, 4, false);
         var masteredError = scheduler.record(VocabularyService.ProgressStatus.MASTERED, 5, false);
 
-        assertThat(learningError.status()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
-        assertThat(learningError.stage()).isEqualTo(1);
         assertThat(reviewingError.status()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
-        assertThat(reviewingError.stage()).isEqualTo(2);
+        assertThat(reviewingError.stage()).isEqualTo(1);
+        assertThat(learnedError.status()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
+        assertThat(learnedError.stage()).isEqualTo(3);
         assertThat(masteredError.status()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(masteredError.stage()).isEqualTo(4);
         assertThat(masteredError.nextReviewAt()).isEqualTo(Instant.parse("2026-09-30T12:00:00Z").atOffset(ZoneOffset.UTC));

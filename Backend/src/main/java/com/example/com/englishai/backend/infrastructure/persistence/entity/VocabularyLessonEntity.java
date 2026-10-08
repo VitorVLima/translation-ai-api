@@ -66,7 +66,9 @@ public class VocabularyLessonEntity {
 
     public void completeQuiz(int score, OffsetDateTime now) {
         if (quizCompleted) return;
-        if (score < 0 || score > VocabularyService.QUIZ_QUESTION_COUNT) {
+        // Scores 4/5 remain valid for lessons completed before the three-question
+        // contract. New submissions are constrained by VocabularyService.
+        if (score < 0 || score > 5) {
             throw new IllegalArgumentException("Invalid vocabulary quiz score");
         }
         quizCompleted = true;

@@ -7,6 +7,8 @@ import com.example.com.englishai.backend.application.user.exception.UserAlreadyE
 import com.example.com.englishai.backend.application.ports.*;
 import com.example.com.englishai.backend.domain.authentication.*;
 import com.example.com.englishai.backend.domain.user.User;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -53,11 +55,18 @@ public class LoginWithGoogle {
         if (identity != null) {
             user = users.findById(identity.userId()).orElseThrow(InvalidExternalIdentityException::new);
         } else {
-            user = users.findByEmail(external.email()).orElse(null);
-            if (user != null) throw new AuthenticationMethodConflictException();
-            String username = uniqueUsername(external.email(), external.displayName());
+            String normalizedEmail = EmailAddress.normalize(external.email());
             try {
-                user = users.save(new User(UUID.randomUUID(), external.email(), username, null, now(), now(), true));
+                user = users.findByEmail(normalizedEmail).orElse(null);
+            } catch (AmbiguousEmailAddressException exception) {
+                throw new AuthenticationMethodConflictException();
+            }
+            if (user != null) throw new AuthenticationMethodConflictException();
+            String username = external.displayName() == null ? null : external.displayName().trim();
+            if (username != null && username.isBlank()) username = null;
+            if (username != null && username.length() > 100) username = username.substring(0, 100).trim();
+            try {
+                user = users.save(new User(UUID.randomUUID(), normalizedEmail, username, null, now(), now(), true));
                 identities.save(new ExternalIdentity(UUID.randomUUID(), user.getId(), external.provider(), external.subject(), now()));
             } catch (UserAlreadyExistsException | ExternalIdentityConflictException e) {
                 throw new AuthenticationMethodConflictException();
@@ -67,16 +76,6 @@ public class LoginWithGoogle {
         User authenticatedUser = user;
         String refreshToken = transaction.execute(repository -> issueRefreshToken(authenticatedUser, repository));
         return new LoginResult(authenticatedUser, accessToken, refreshToken);
-    }
-
-    private String uniqueUsername(String email, String displayName) {
-        String base = (displayName != null && !displayName.isBlank() ? displayName : email.substring(0, email.indexOf('@')))
-                .toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "_").replaceAll("^_+|_+$", "");
-        if (base.length() < 3) base = "google_user";
-        base = base.substring(0, Math.min(80, base.length()));
-        String candidate;
-        do { candidate = base + "_" + UUID.randomUUID().toString().substring(0, 6); } while (users.existsByUsername(candidate));
-        return candidate;
     }
 
     private OffsetDateTime now() { return OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC); }

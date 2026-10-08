@@ -10,6 +10,8 @@ import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRep
 import com.example.com.englishai.backend.application.ports.RefreshTokenRepository;
 import com.example.com.englishai.backend.application.ports.RefreshTokenTransaction;
 import com.example.com.englishai.backend.application.ports.UserRepository;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
 import com.example.com.englishai.backend.domain.authentication.RefreshToken;
 import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamily;
 import com.example.com.englishai.backend.domain.user.User;
@@ -80,7 +82,13 @@ public class LoginUser {
     }
 
     public LoginResult execute(String email, String rawPassword) {
-        User user = userRepository.findByEmail(email).orElse(null);
+        User user;
+        try {
+            user = userRepository.findByEmail(EmailAddress.normalize(email)).orElse(null);
+        } catch (AmbiguousEmailAddressException exception) {
+            passwordEncoder.matchesDummy(rawPassword);
+            throw new InvalidCredentialsException();
+        }
         if (user == null) {
             passwordEncoder.matchesDummy(rawPassword);
             throw new InvalidCredentialsException();

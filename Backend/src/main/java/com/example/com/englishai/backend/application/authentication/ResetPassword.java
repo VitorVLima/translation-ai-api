@@ -6,6 +6,8 @@ import com.example.com.englishai.backend.application.ports.PasswordResetCodeHash
 import com.example.com.englishai.backend.application.ports.PasswordResetCodeRepository;
 import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
 import com.example.com.englishai.backend.application.ports.UserRepository;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
 import com.example.com.englishai.backend.domain.authentication.PasswordResetCode;
 import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamilyRevocationReason;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -35,10 +37,24 @@ public class ResetPassword {
         this.passwordEncoder = passwordEncoder; this.families = families; this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = InvalidPasswordResetCodeException.class)
     public void execute(String email, String rawCode, String newPassword) {
-        var user = users.findByEmailForUpdate(email.trim()).orElseThrow(InvalidPasswordResetCodeException::new);
         var now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        var user = findUserForReset(email);
+        PasswordResetCode code = requireValidCode(user, rawCode, now);
+        users.save(user.changePassword(passwordEncoder.encode(newPassword), now).verifyEmail(now));
+        codes.save(code.markUsed(now));
+        families.revokeAllByUserId(user.getId(), now, RefreshTokenFamilyRevocationReason.PASSWORD_RESET);
+    }
+
+    @Transactional(noRollbackFor = InvalidPasswordResetCodeException.class)
+    public void validateCode(String email, String rawCode) {
+        var user = findUserForReset(email);
+        requireValidCode(user, rawCode, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
+    }
+
+    private PasswordResetCode requireValidCode(com.example.com.englishai.backend.domain.user.User user,
+                                               String rawCode, OffsetDateTime now) {
         PasswordResetCode code = codes.findByUserIdForUpdate(user.getId()).stream()
                 .filter(c -> c.getUsedAt() == null && c.getInvalidatedAt() == null
                         && now.isBefore(c.getExpiresAt()) && c.getAttempts() < c.getMaxAttempts())
@@ -48,8 +64,17 @@ public class ResetPassword {
             codes.save(code.incrementAttempts());
             throw new InvalidPasswordResetCodeException();
         }
-        users.save(user.changePassword(passwordEncoder.encode(newPassword), now));
-        codes.save(code.markUsed(now));
-        families.revokeAllByUserId(user.getId(), now, RefreshTokenFamilyRevocationReason.PASSWORD_RESET);
+        return code;
+    }
+
+    private com.example.com.englishai.backend.domain.user.User findUserForReset(String email) {
+        try {
+            var user = users.findByEmailForUpdate(EmailAddress.normalize(email))
+                    .orElseThrow(InvalidPasswordResetCodeException::new);
+            if (user.getPasswordHash() == null) throw new InvalidPasswordResetCodeException();
+            return user;
+        } catch (AmbiguousEmailAddressException exception) {
+            throw new InvalidPasswordResetCodeException();
+        }
     }
 }

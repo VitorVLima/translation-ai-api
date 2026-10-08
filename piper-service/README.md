@@ -2,6 +2,8 @@
 
 Servico local independente de Text-to-Speech usando Piper. O endpoint recebe texto e devolve diretamente um arquivo WAV. Nenhum audio e persistido.
 
+Em produção, `/synthesize` e `/voices` não têm autenticação própria. Mantenha o serviço acessível somente ao Backend por loopback ou rede privada; não publique a porta 8002 na Internet nem a encaminhe por um proxy público. Se Backend e Piper estiverem em hosts distintos, restrinja a porta ao endereço/rede do Backend e valide o acesso a partir de uma rede externa.
+
 ## Windows PowerShell
 
 ```powershell

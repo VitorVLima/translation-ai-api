@@ -22,7 +22,8 @@ public class ReadingQuestionEntity {
     public ReadingQuestionEntity(UUID id, UUID activityId, int number, ReadingService.Question question) {
         this.id=id; this.activityId=activityId; this.questionNumber=(short)number; this.type=question.type(); this.question=question.question();
         this.optionA=question.options().get(0); this.optionB=question.options().get(1); this.optionC=question.options().get(2); this.optionD=question.options().get(3);
-        this.correctOption=(short)question.correctOption(); this.explanation=question.explanation();
+        if (question.correctOption() == null) throw new IllegalArgumentException("Question answer is required for persistence");
+        this.correctOption=question.correctOption().shortValue(); this.explanation=question.explanation();
     }
     public UUID getId(){return id;} public UUID getActivityId(){return activityId;} public int getQuestionNumber(){return questionNumber;} public ReadingService.QuestionType getType(){return type;}
     public String getQuestion(){return question;} public List<String> getOptions(){return List.of(optionA,optionB,optionC,optionD);} public int getCorrectOption(){return correctOption;} public String getExplanation(){return explanation;}

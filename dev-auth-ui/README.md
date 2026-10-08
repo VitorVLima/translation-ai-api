@@ -1,5 +1,7 @@
 # EnglishAI — Interface web
 
+**Uso exclusivo de desenvolvimento e validação local. Não publique `dev-auth-ui/` em produção.** O servidor `python -m http.server` abaixo não fornece autenticação de acesso à própria página nem headers de segurança de produção. Exclua este diretório dos artefatos de deploy e não inclua sua origem em `APP_CORS_ALLOWED_ORIGINS` de produção. Para administração em produção, use `admin-ui/`.
+
 Interface de aprendizado de idiomas em HTML, CSS e JavaScript, sem framework, bundler ou dependências visuais externas. Conversação, tradução e correção usam as integrações existentes do EnglishAI.
 
 ## Executar localmente
@@ -56,6 +58,8 @@ A auditoria encontrou sequências de ícones previamente interpretadas em um enc
 ## Privacidade e comportamento
 
 Tokens permanecem somente no `sessionStorage` da aba. Requisições autenticadas mantêm a tentativa única de refresh e repetição após 401. O Google usa nonce novo a cada preparação.
+
+O logout remove access e refresh tokens da aba. Como JavaScript da mesma origem pode ler `sessionStorage`, esta ferramenta não deve ser hospedada junto com aplicações de produção nem carregar scripts não confiáveis.
 
 Conversation history is persisted in the Backend; the UI renders GET detail and does not send client history as the source of truth. Audio stays transient and no conversation content or tokens are logged.
 

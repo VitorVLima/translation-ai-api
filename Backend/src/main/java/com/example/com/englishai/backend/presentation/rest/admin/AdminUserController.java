@@ -3,12 +3,12 @@ package com.example.com.englishai.backend.presentation.rest.admin;
 import com.example.com.englishai.backend.domain.user.UserRole;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserJpaRepository;
+import com.example.com.englishai.backend.presentation.rest.PageWindow;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,12 +20,11 @@ public class AdminUserController {
     public AdminUserController(UserJpaRepository users) { this.users = users; }
 
     @GetMapping
-    public List<UserSummary> list(@RequestParam(required = false) String search) {
+    public List<UserSummary> list(@RequestParam(required = false) String search,
+                                  @RequestParam(required = false) Integer page,
+                                  @RequestParam(required = false) Integer size) {
         String term = search == null ? "" : search.trim().toLowerCase(java.util.Locale.ROOT);
-        return users.findAll().stream()
-                .filter(u -> term.isBlank() || u.getEmail().toLowerCase(java.util.Locale.ROOT).contains(term)
-                        || u.getUsername().toLowerCase(java.util.Locale.ROOT).contains(term))
-                .sorted(Comparator.comparing(UserEntity::getCreatedAt))
+        return users.findSummariesForAdmin(term, PageWindow.optional(page, size, 25)).stream()
                 .map(UserSummary::from).toList();
     }
 
@@ -49,5 +48,8 @@ public class AdminUserController {
     public record RoleRequest(@NotNull String role) {}
     public record UserSummary(UUID id, String email, String username, UserRole role, OffsetDateTime createdAt) {
         static UserSummary from(UserEntity u) { return new UserSummary(u.getId(), u.getEmail(), u.getUsername(), u.getRole(), u.getCreatedAt()); }
+        static UserSummary from(UserJpaRepository.AdminUserSummaryView u) {
+            return new UserSummary(u.getId(), u.getEmail(), u.getUsername(), u.getRole(), u.getCreatedAt());
+        }
     }
 }

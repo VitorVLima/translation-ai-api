@@ -19,13 +19,14 @@ class ReadingServiceTest {
 
     void respond(String raw) { when(provider.complete(any())).thenReturn(new LlmResponse(raw)); }
     String passage(String text, String language) throws Exception {
-        return new ObjectMapper().writeValueAsString(Map.of("text", text, "language", language));
+        return new ObjectMapper().writeValueAsString(Map.of("title", "Anna's Walk to School", "text", text, "language", language));
     }
 
     @ParameterizedTest @EnumSource(ConversationDifficulty.class)
     void generatesEnglishWithLevelSpecificGuidance(ConversationDifficulty difficulty) throws Exception {
         respond(passage(PASSAGE, "en"));
         var result = service.generate(difficulty, ReadingTopic.TRAVEL);
+        assertThat(result.title()).isEqualTo("Anna's Walk to School");
         assertThat(result.text()).isEqualTo(PASSAGE);
         assertThat(result.difficulty()).isEqualTo(difficulty);
         assertThat(result.topic()).isEqualTo(ReadingTopic.TRAVEL);
@@ -58,6 +59,12 @@ class ReadingServiceTest {
         respond(raw);
         assertThatThrownBy(() -> service.generate(ConversationDifficulty.BEGINNER, ReadingTopic.CULTURE)).isInstanceOf(LlmProviderException.class);
     }
+    @Test void rejectsMissingOrGenericTitle() throws Exception {
+        respond("{\"language\":\"en\",\"text\":\"A real passage.\"}");
+        assertThatThrownBy(() -> service.generate(ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL)).isInstanceOf(LlmProviderException.class);
+        respond(passage(PASSAGE, "en").replace("Anna's Walk to School", "TRAVEL"));
+        assertThatThrownBy(() -> service.generate(ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL)).isInstanceOf(LlmProviderException.class);
+    }
     @Test void acceptsFencedStructuredResponse() throws Exception {
         respond("```json\n" + passage(PASSAGE, "en") + "\n```");
         assertThat(service.generate(ConversationDifficulty.INTERMEDIATE, ReadingTopic.TECHNOLOGY).text()).isEqualTo(PASSAGE);
@@ -68,17 +75,42 @@ class ReadingServiceTest {
         assertThat(result.items()).containsExactly(new ReadingService.HintItem("along the way", "Significa durante o caminho.", ReadingService.HintType.EXPRESSION));
         verify(provider).complete(argThat(r -> r.systemPrompt().contains("ADVANCED") && r.systemPrompt().contains("Brazilian Portuguese")
                 && r.systemPrompt().contains("Do not translate the whole passage") && r.systemPrompt().contains("avoid basic words")
+                && r.systemPrompt().contains("C1-C2") && r.systemPrompt().contains("complete expression")
+                && r.systemPrompt().contains("exact contiguous excerpt") && r.systemPrompt().contains("not just a dictionary translation")
+                && r.systemPrompt().contains("up to 4") && r.systemPrompt().contains("including zero")
                 && r.userPrompt().contains("<reading>")));
     }
-    @Test void capsHintsAtFiveAndDiscardsInvalidOrUnrelatedItems() throws Exception {
+    @ParameterizedTest @EnumSource(ConversationDifficulty.class)
+    void hintSelectionGuidanceAdaptsToLevel(ConversationDifficulty difficulty) {
+        respond("{\"items\":[]}");
+        assertThat(service.hint(PASSAGE, difficulty).items()).isEmpty();
+        int limit = switch (difficulty) { case BEGINNER -> 10; case INTERMEDIATE -> 7; case ADVANCED -> 4; };
+        verify(provider).complete(argThat(r -> r.systemPrompt().contains(difficulty.cefrRange())
+                && r.systemPrompt().contains("up to " + limit + " genuinely useful hints")
+                && r.systemPrompt().contains("word frequency")
+                && r.systemPrompt().contains("phrasal verbs")
+                && r.systemPrompt().contains("collocations")
+                && r.systemPrompt().contains("Never add trivial hints to fill a quota")));
+    }
+    @Test void acceptsVariableHintCountAndRejectsTermsAbsentFromThePassage() {
+        respond("{\"items\":[{\"expression\":\"along the way\",\"explanation\":\"No texto, durante o caminho.\",\"type\":\"EXPRESSION\"},"
+                + "{\"expression\":\"talking\",\"explanation\":\"Aqui, conversar com os amigos.\",\"type\":\"VOCABULARY\"},"
+                + "{\"expression\":\"forward\",\"explanation\":\"NÃ£o ocorre no texto.\",\"type\":\"VOCABULARY\"}]}");
+        assertThat(service.hint(PASSAGE, ConversationDifficulty.BEGINNER).items())
+                .extracting(ReadingService.HintItem::expression).containsExactly("along the way", "talking");
+    }
+    @ParameterizedTest @EnumSource(ConversationDifficulty.class)
+    void capsHintsByLevelAndDiscardsInvalidOrUnrelatedItems(ConversationDifficulty difficulty) throws Exception {
+        String text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november.";
         var items = new ArrayList<Map<String, String>>();
         items.add(Map.of("expression", "unrelated", "explanation", "Invalid", "type", "VOCABULARY"));
-        items.add(Map.of("expression", "morning", "explanation", "Invalid", "type", "BAD"));
-        for (String word : List.of("morning", "walks", "school", "enjoys", "talking", "friends"))
+        items.add(Map.of("expression", "alpha", "explanation", "Invalid", "type", "BAD"));
+        for (String word : text.replace(".", "").split(" "))
             items.add(Map.of("expression", word, "explanation", "Explicação curta.", "type", "VOCABULARY"));
         respond(new ObjectMapper().writeValueAsString(Map.of("items", items)));
-        assertThat(service.hint(PASSAGE, ConversationDifficulty.BEGINNER).items()).hasSize(5)
-                .allMatch(item -> PASSAGE.contains(item.expression()));
+        int limit = switch (difficulty) { case BEGINNER -> 10; case INTERMEDIATE -> 7; case ADVANCED -> 4; };
+        assertThat(service.hint(text, difficulty).items()).hasSize(limit)
+                .allMatch(item -> text.contains(item.expression()));
     }
     @ParameterizedTest @ValueSource(strings = {"not json", "null", "{}", "{\"items\":42}", "{\"items\":[{}]}"})
     void invalidHintsFallBackToEmptyItems(String raw) {
@@ -108,5 +140,200 @@ class ReadingServiceTest {
     void malformedQuestionsFallBackToEmptyList(String raw) {
         respond(raw);
         assertThat(service.questions(PASSAGE, ConversationDifficulty.BEGINNER).questions()).isEmpty();
+    }
+
+    @Test void listForUserMapsOnlyRepositoryResultsInCreatedAtOrder() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        var newest = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.SummaryView.class);
+        var older = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.SummaryView.class);
+        UUID newestId = UUID.randomUUID(), olderId = UUID.randomUUID();
+        when(newest.getActivityId()).thenReturn(newestId);
+        when(newest.getTitle()).thenReturn("Newest passage");
+        when(older.getActivityId()).thenReturn(olderId);
+        when(older.getTitle()).thenReturn("Older passage");
+        when(activities.findSummariesByUserId(eq(userId), any())).thenReturn(List.of(newest, older));
+
+        var summaries = persisted.listForUser(userId);
+        assertThat(summaries).extracting(ReadingService.ActivitySummary::activityId)
+                .containsExactly(newestId, olderId);
+        assertThat(summaries).extracting(ReadingService.ActivitySummary::title)
+                .containsExactly("Newest passage", "Older passage");
+        verify(activities).findSummariesByUserId(eq(userId), any());
+        verifyNoInteractions(questions);
+    }
+
+    @Test void firstReadingIsAllowedAndSecondInProgressReadingIsRejectedBeforeGeneration() throws Exception {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        respond(passage(PASSAGE, "en"));
+        when(activities.existsByUserIdAndStatus(userId, com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.IN_PROGRESS))
+                .thenReturn(false, true);
+        when(activities.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(persisted.generateForUser(userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL).activityId()).isNotNull();
+        assertThatThrownBy(() -> persisted.generateForUser(userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL))
+                .isInstanceOf(ReadingActivityInProgressException.class);
+        verify(provider, times(2)).complete(any());
+    }
+
+    @Test void generatedHintsAreStoredWithTheReadingAndReturnedFromItsDetail() throws Exception {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        when(provider.complete(any())).thenReturn(new LlmResponse(passage(PASSAGE, "en")),
+                new LlmResponse("{\"items\":[{\"expression\":\"along the way\",\"explanation\":\"No texto, durante o caminho.\",\"type\":\"EXPRESSION\"}]}"));
+        when(activities.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var reading = persisted.generateForUser(userId, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL);
+        var saved = org.mockito.ArgumentCaptor.forClass(com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.class);
+        verify(activities).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getHints()).extracting(ReadingService.HintItem::expression).containsExactly("along the way");
+        when(activities.findByIdAndUserId(reading.activityId(), userId)).thenReturn(Optional.of(saved.getValue()));
+        when(questions.findByActivityIdOrderByQuestionNumber(reading.activityId())).thenReturn(List.of());
+        assertThat(persisted.detailForUser(userId, reading.activityId()).hints()).containsExactlyElementsOf(saved.getValue().getHints());
+    }
+
+    @Test void temporaryHintFailureDoesNotDiscardTheGeneratedReading() throws Exception {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        when(provider.complete(any())).thenReturn(new LlmResponse(passage(PASSAGE, "en")))
+                .thenThrow(new LlmProviderException("unavailable"));
+        when(activities.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        assertThat(persisted.generateForUser(UUID.randomUUID(), ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL).activityId()).isNotNull();
+        var saved = org.mockito.ArgumentCaptor.forClass(com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.class);
+        verify(activities).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getHints()).isNull();
+    }
+
+    @Test void legacyReadingGeneratesHintsOnceAndThenReusesPersistedItems() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID(), activityId = UUID.randomUUID();
+        var activity = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity(
+                activityId, userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "A walk", PASSAGE, java.time.OffsetDateTime.now());
+        when(activities.findByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+        when(activities.findForUpdateByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+        respond("{\"items\":[{\"expression\":\"along the way\",\"explanation\":\"Durante o caminho.\",\"type\":\"EXPRESSION\"}]}");
+        assertThat(persisted.hintsForActivity(userId, activityId).items()).hasSize(1);
+        assertThat(persisted.hintsForActivity(userId, activityId).items()).hasSize(1);
+        verify(provider, times(1)).complete(any());
+        verify(activities, times(1)).saveAndFlush(activity);
+    }
+
+    @Test void concurrentInsertConflictIsReturnedAsTheSameBusinessRule() throws Exception {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        respond(passage(PASSAGE, "en"));
+        when(activities.existsByUserIdAndStatus(userId, com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.IN_PROGRESS))
+                .thenReturn(false);
+        when(activities.saveAndFlush(any())).thenThrow(new org.springframework.dao.DataIntegrityViolationException("uk_reading_activity_one_in_progress_per_user"));
+
+        assertThatThrownBy(() -> persisted.generateForUser(userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL))
+                .isInstanceOf(ReadingActivityInProgressException.class);
+    }
+
+    @Test void detailUsesOwnershipScopedLookupAndHidesAnswersBeforeCompletion() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        var activity = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity(
+                activityId, userId, ConversationDifficulty.INTERMEDIATE, ReadingTopic.CULTURE, "Cultural passage", "A passage", java.time.OffsetDateTime.now());
+        var question = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingQuestionEntity(
+                UUID.randomUUID(), activityId, 1,
+                new ReadingService.Question(UUID.randomUUID(), ReadingService.QuestionType.DETAIL,
+                        "Where?", List.of("A", "B", "C", "D"), 2, "Explanation"));
+        when(activities.findByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+        when(questions.findByActivityIdOrderByQuestionNumber(activityId)).thenReturn(List.of(question));
+
+        var detail = persisted.detailForUser(userId, activityId);
+        assertThat(detail.questions()).singleElement().satisfies(value -> {
+            assertThat(value.correctOption()).isNull();
+            assertThat(value.explanation()).isNull();
+        });
+        verify(activities).findByIdAndUserId(activityId, userId);
+    }
+
+    @Test void detailRejectsAnActivityThatDoesNotBelongToTheUser() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        when(activities.findByIdAndUserId(activityId, userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> persisted.detailForUser(userId, activityId))
+                .isInstanceOf(NoSuchElementException.class);
+        verifyNoInteractions(questions);
+    }
+
+    @Test void completedDetailExposesPersistedResultAndQuestionFeedbackWithoutRegeneration() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        var activity = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity(
+                activityId, userId, ConversationDifficulty.INTERMEDIATE, ReadingTopic.CULTURE, "A Cultural Passage", "A passage", java.time.OffsetDateTime.now());
+        activity.complete(2, 67, com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.SUCCESS, java.time.OffsetDateTime.now());
+        var question = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingQuestionEntity(
+                UUID.randomUUID(), activityId, 1,
+                new ReadingService.Question(UUID.randomUUID(), ReadingService.QuestionType.DETAIL,
+                        "Where?", List.of("A", "B", "C", "D"), 2, "Explanation"));
+        when(activities.findByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+        when(questions.findByActivityIdOrderByQuestionNumber(activityId)).thenReturn(List.of(question));
+
+        var detail = persisted.detailForUser(userId, activityId);
+        assertThat(detail.status()).isEqualTo(com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.SUCCESS);
+        assertThat(detail.correctAnswers()).isEqualTo(2);
+        assertThat(detail.comprehensionPercentage()).isEqualTo(67);
+        assertThat(detail.questions()).singleElement().satisfies(value -> {
+            assertThat(value.correctOption()).isEqualTo(2);
+            assertThat(value.explanation()).isEqualTo("Explanation");
+        });
+        verify(provider, never()).complete(any());
+    }
+
+    @Test void deletesOnlyOwnedInProgressActivityAndFlushesCascadeDelete() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        var activity = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity(
+                activityId, userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "A Travel Passage", "A passage", java.time.OffsetDateTime.now());
+        when(activities.findForUpdateByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+
+        persisted.deleteInProgressForUser(userId, activityId);
+
+        verify(activities).delete(activity);
+        verify(activities).flush();
+    }
+
+    @Test void refusesToDeleteCompletedActivity() {
+        var activities = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingActivityJpaRepository.class);
+        var questions = mock(com.example.com.englishai.backend.infrastructure.persistence.repository.ReadingQuestionJpaRepository.class);
+        var persisted = new ReadingService(provider, activities, questions, java.time.Clock.systemUTC());
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        var activity = new com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity(
+                activityId, userId, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "A Travel Passage", "A passage", java.time.OffsetDateTime.now());
+        activity.complete(2, 67, com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.SUCCESS, java.time.OffsetDateTime.now());
+        when(activities.findForUpdateByIdAndUserId(activityId, userId)).thenReturn(Optional.of(activity));
+
+        assertThatThrownBy(() -> persisted.deleteInProgressForUser(userId, activityId))
+                .isInstanceOf(IllegalStateException.class);
+        verify(activities, never()).delete(any());
+        verify(activities, never()).flush();
     }
 }

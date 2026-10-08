@@ -16,7 +16,7 @@ public class UserEntity {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(nullable = false, unique = true)
+    @Column(length = 100)
     private String username;
 
     @Column(name = "password_hash")
@@ -68,6 +68,11 @@ public class UserEntity {
 
     public String getUsername() {
         return username;
+    }
+
+    public void setUsername(String username, OffsetDateTime updatedAt) {
+        this.username = username;
+        this.updatedAt = updatedAt;
     }
 
     public String getPasswordHash() {

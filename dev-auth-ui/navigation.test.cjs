@@ -1,4 +1,4 @@
-const test = require("node:test");
+﻿const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -306,7 +306,7 @@ test("The rendered Cadastre-se button keeps registration open while initial sess
   for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.get("login-card").hidden, true);
   assert.equal(ui.get("register-card").hidden, false);
-  assert.equal(ui.get("register-username").id, "register-username");
+  assert.equal(ui.get("register-email").id, "register-email");
 });
 
 test("The real forgot-password action remains open while initial session restoration finishes", async () => {
@@ -406,8 +406,7 @@ test("Unverified login handles expired codes and server resend limits without pa
 test("Registration validates the minimum fields and matching password locally", async () => {
   const ui = await app(); await ui.get("show-register").click();
   await ui.run('registerLocal({ preventDefault() {} })');
-  assert.match(ui.get("register-message").textContent, /nome de usuário/);
-  ui.get("register-username").value = "learner";
+  assert.match(ui.get("register-message").textContent, /e-mail/);
   ui.get("register-email").value = "learner@example.com";
   ui.get("register-password").value = "secret1";
   ui.get("register-password-confirm").value = "different";
@@ -417,15 +416,14 @@ test("Registration validates the minimum fields and matching password locally", 
 });
 
 test("Valid registration sends only the backend contract and opens email verification", async () => {
-  const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 201, body: { id: "new-user", email: "learner@example.com", username: "learner" } } : null });
+  const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 201, body: { id: "new-user", email: "learner@example.com", username: null } } : null });
   await ui.get("show-register").click();
-  ui.get("register-username").value = "learner";
   ui.get("register-email").value = "learner@example.com";
   ui.get("register-password").value = "secret1";
   ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })');
   const request = ui.calls.find(item => item.path === "/api/v1/auth/register");
-  assert.deepEqual(request.body, { email: "learner@example.com", username: "learner", password: "secret1" });
+  assert.deepEqual(request.body, { email: "learner@example.com", password: "secret1" });
   assert.equal(request.body.confirmPassword, undefined);
   assert.equal(ui.get("register-card").hidden, true);
   assert.equal(ui.get("verification-card").hidden, false);
@@ -439,7 +437,7 @@ test("Valid registration sends only the backend contract and opens email verific
 test("Registration prevents duplicate submissions and restores the button after failure", async () => {
   let resolve; const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? new Promise(r => resolve = r) : null });
   await ui.get("show-register").click();
-  ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com";
+  ui.get("register-email").value = "learner@example.com";
   ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   const pending = ui.run('registerLocal({ preventDefault() {} })');
   assert.equal(ui.get("register-submit").disabled, true);
@@ -451,10 +449,10 @@ test("Registration prevents duplicate submissions and restores the button after 
   assert.match(ui.get("register-message").textContent, /Não foi possível criar/);
 });
 
-test("Registration maps duplicate email and username errors without exposing internals", async () => {
-  for (const [message, expected] of [["Email already exists", "Este e-mail já está em uso."], ["Username already exists", "Este nome de usuário já está em uso."]]) {
+test("Registration maps duplicate email errors without exposing internals", async () => {
+  for (const [message, expected] of [["Email already exists", "Este e-mail já está em uso."]]) {
     const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 409, body: { message } } : null });
-    await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+    await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
     await ui.run('registerLocal({ preventDefault() {} })');
     assert.equal(ui.get("register-message").textContent, expected);
     assert.equal(ui.get("register-message").textContent.includes(message), false);
@@ -463,7 +461,7 @@ test("Registration maps duplicate email and username errors without exposing int
 
 test("Registration reports a connection failure without changing the auth view", async () => {
   const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? Promise.reject(new Error("network")) : null });
-  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })');
   assert.equal(ui.get("register-card").hidden, false);
   assert.match(ui.get("register-message").textContent, /Não foi possível conectar/);
@@ -471,7 +469,7 @@ test("Registration reports a connection failure without changing the auth view",
 
 test("Email verification submits six digits and returns to login on success", async () => {
   const ui = await app({ handle: request => request.path === "/api/v1/auth/register" ? { status: 201 } : request.path === "/api/v1/auth/verify-email" ? { status: 204 } : null });
-  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456";
   await ui.run('verifyEmail({ preventDefault() {} })');
   const request = ui.calls.find(item => item.path === "/api/v1/auth/verify-email");
@@ -482,7 +480,7 @@ test("Email verification submits six digits and returns to login on success", as
 
 test("Email verification rejects empty or invalid codes without a request", async () => {
   const ui = await app(); await ui.get("show-register").click();
-  ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })');
   await ui.run('verifyEmail({ preventDefault() {} })');
   assert.equal(ui.get("verification-message").textContent, "Informe um código de 6 dígitos.");
@@ -493,7 +491,7 @@ test("Email verification rejects empty or invalid codes without a request", asyn
 
 test("Invalid or expired verification code keeps the screen and shows a safe error", async () => {
   const ui = await app({ handle: request => request.path === "/api/v1/auth/verify-email" ? { status: 400, body: { message: "Invalid or expired verification code" } } : null });
-  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456"; await ui.run('verifyEmail({ preventDefault() {} })');
   assert.equal(ui.get("verification-card").hidden, false); assert.equal(ui.get("login-card").hidden, true);
   assert.equal(ui.get("verification-message").textContent, "Código incorreto ou expirado."); await ui.run('showAuthMode("login")');
@@ -501,7 +499,7 @@ test("Invalid or expired verification code keeps the screen and shows a safe err
 
 test("Verification loading prevents duplicate submissions", async () => {
   let resolve; const ui = await app({ handle: request => request.path === "/api/v1/auth/verify-email" ? new Promise(r => resolve = r) : null });
-  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456";
   const pending = ui.run('verifyEmail({ preventDefault() {} })'); assert.equal(ui.get("verification-submit").disabled, true);
   await ui.run('verifyEmail({ preventDefault() {} })'); assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/verify-email").length, 1);
@@ -510,7 +508,7 @@ test("Verification loading prevents duplicate submissions", async () => {
 
 test("Verification resend observes the 60 second cooldown and restarts it after success", async () => {
   const ui = await app({ handle: request => request.path === "/api/v1/auth/resend-verification" ? { status: 204 } : null });
-  await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); await ui.get("resend-verification").click();
   assert.equal(ui.calls.filter(request => request.path === "/api/v1/auth/resend-verification").length, 0);
   await ui.run('verificationCooldownEnd = Date.now() - 1; updateVerificationCooldown()'); assert.equal(ui.get("resend-verification").disabled, false);
@@ -520,7 +518,7 @@ test("Verification resend observes the 60 second cooldown and restarts it after 
 });
 
 test("Leaving verification clears the code, email and timer", async () => {
-  const ui = await app(); await ui.get("show-register").click(); ui.get("register-username").value = "learner"; ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
+  const ui = await app(); await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456"; await ui.get("verification-back-login").click();
   assert.equal(ui.get("verification-code").value, ""); assert.equal(ui.run("pendingVerificationEmail"), ""); assert.equal(ui.run("verificationTimer"), null);
 });
@@ -1859,6 +1857,16 @@ test("Header profile control opens Profile while logout only clears the session"
   assert.equal(ui.get("app-view").hidden, true);
   assert.notEqual(ui.state().currentView, "profile");
   assert.ok(ui.calls.some(request => request.path === "/api/v1/auth/logout"));
+  assert.equal(ui.storage.has("englishai_access_token"), false);
+  assert.equal(ui.storage.has("englishai_refresh_token"), false);
+});
+
+test("Progress chart escapes unexpected API text before HTML insertion", async () => {
+  const ui = await app();
+  ui.run('renderProgressVocabularyChart($("progress-vocabulary-chart"), { totalWords: "<img src=x onerror=alert(1)>", newCount: 1 })');
+  const markup = ui.get("progress-vocabulary-chart").innerHTML;
+  assert.match(markup, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(markup, /<img src=x/);
 });
 
 test("Header profile and logout are independent button controls", () => {

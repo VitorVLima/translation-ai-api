@@ -18,6 +18,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.util.function.Supplier;
+import com.example.com.englishai.backend.application.conversation.LocalOperationLocks;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -37,7 +43,7 @@ import java.util.logging.Logger;
 
 public class VocabularyService {
     public static final int VOCABULARY_ITEMS_PER_LESSON = 10;
-    public static final int QUIZ_QUESTION_COUNT = 5;
+    public static final int QUIZ_QUESTION_COUNT = 3;
     public static final int MAX_SENTENCE_LENGTH = 1000;
     private static final int RECENT_WORD_LIMIT = 20;
     private static final int MAX_REVIEWS_PER_LESSON = 3;
@@ -52,11 +58,19 @@ public class VocabularyService {
     private final VocabularyItemJpaRepository items;
     private final UserJpaRepository users;
     private final VocabularyReviewScheduler reviewScheduler;
+    private final TransactionTemplate writes;
+    private final LocalOperationLocks localLocks = new LocalOperationLocks();
 
     public VocabularyService(LlmProvider provider, UserProfileJpaRepository profiles,
                              VocabularyLessonJpaRepository lessons, UserVocabularyWordJpaRepository vocabularyWords,
                              VocabularyItemJpaRepository items, UserJpaRepository users,
                              VocabularyReviewScheduler reviewScheduler) {
+        this(provider, profiles, lessons, vocabularyWords, items, users, reviewScheduler, null);
+    }
+    public VocabularyService(LlmProvider provider, UserProfileJpaRepository profiles,
+                             VocabularyLessonJpaRepository lessons, UserVocabularyWordJpaRepository vocabularyWords,
+                             VocabularyItemJpaRepository items, UserJpaRepository users,
+                             VocabularyReviewScheduler reviewScheduler, PlatformTransactionManager manager) {
         this.provider = Objects.requireNonNull(provider);
         this.profiles = Objects.requireNonNull(profiles);
         this.lessons = Objects.requireNonNull(lessons);
@@ -64,9 +78,11 @@ public class VocabularyService {
         this.items = Objects.requireNonNull(items);
         this.users = Objects.requireNonNull(users);
         this.reviewScheduler = Objects.requireNonNull(reviewScheduler);
+        this.writes = manager == null ? null : new TransactionTemplate(manager);
+        if (writes != null) writes.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    public enum ProgressStatus { NEW, LEARNING, REVIEWING, MASTERED }
+    public enum ProgressStatus { NEW, REVIEWING, LEARNED, MASTERED }
 
     public static String normalizeWord(String word) {
         if (word == null) return null;
@@ -91,10 +107,49 @@ public class VocabularyService {
     public record Evaluation(String status, String correctedSentence, String explanation, String alternative,
                              LessonProgress progress) {}
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Lesson today(UUID userId) {
-        users.findByIdForUpdate(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found"));
+        return localLocks.run(userId, () -> todayWithoutLongTransaction(userId));
+    }
+
+    private record ReviewSource(UUID vocabularyWordId, String word, String translation,
+                                String example, String exampleTranslation) {}
+    private record TodayPlan(LocalDate date, Lesson existing, UUID legacyId, int missing, List<String> existingWords,
+                             EnglishLevel level, VocabularyCategory category, OffsetDateTime now,
+                             List<ReviewSource> reviews, List<String> recent) {}
+
+    private Lesson todayWithoutLongTransaction(UUID userId) {
+        var plan = shortTransaction(() -> prepareToday(userId));
+        if (plan.existing() != null) return plan.existing();
+        if (plan.legacyId() != null) {
+            var root = parse(complete(prompt(plan.level(), plan.missing()),
+                    "Complete the existing vocabulary lesson for category " + plan.category().name()
+                            + " and level " + plan.level().name() + ". Generate only " + plan.missing()
+                            + " additional entries. Existing lesson words to preserve and never repeat: "
+                            + plan.existingWords() + ". Avoid these recently studied words unless needed for meaningful review: "
+                            + plan.recent()));
+            var generated = parseWords(root, plan.missing(), plan.existingWords().stream()
+                    .map(VocabularyService::normalizeWord).filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toSet()));
+            return shortTransaction(() -> {
+                users.findByIdForUpdate(userId).orElseThrow(() -> new NoSuchElementException("User not found"));
+                var lesson = lessons.findForUpdateByIdAndUserId(plan.legacyId(), userId)
+                        .orElseThrow(() -> new NoSuchElementException("Vocabulary lesson not found"));
+                if (lesson.getItems().size() >= VOCABULARY_ITEMS_PER_LESSON) return toLesson(lesson);
+                if (lesson.getItems().size() != VOCABULARY_ITEMS_PER_LESSON - plan.missing())
+                    throw new IllegalStateException("Vocabulary lesson changed during generation");
+                return toLesson(completeLegacyLesson(userId, lesson, generated));
+            });
+        }
+        var reviewWords = plan.reviews().stream().map(source -> normalizeWord(source.word())).filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        var generated = generateNewWords(userId, plan.level(), plan.category(),
+                VOCABULARY_ITEMS_PER_LESSON - plan.reviews().size(), plan.recent(), reviewWords);
+        return shortTransaction(() -> persistToday(userId, plan, generated));
+    }
+
+    private TodayPlan prepareToday(UUID userId) {
+        users.findByIdForUpdate(userId).orElseThrow(() -> new NoSuchElementException("User not found"));
         LocalDate date = reviewScheduler.today();
         var existing = lessons.findByUserIdAndLessonDate(userId, date);
         if (existing.isPresent()) {
@@ -102,13 +157,17 @@ public class VocabularyService {
                     .orElseThrow(() -> new NoSuchElementException("Vocabulary lesson disappeared while locking"));
             int itemCount = lesson.getItems().size();
             if (itemCount < VOCABULARY_ITEMS_PER_LESSON) {
-                return toLesson(completeLegacyLesson(userId, lesson, itemCount));
+                var words = lesson.getItems().stream().map(VocabularyItemEntity::getWord)
+                        .filter(Objects::nonNull).toList();
+                var recent = lessons.findRecentWords(userId, PageRequest.of(0, RECENT_WORD_LIMIT));
+                return new TodayPlan(date, null, lesson.getId(), VOCABULARY_ITEMS_PER_LESSON - itemCount,
+                        words, lesson.getEnglishLevel(), lesson.getCategory(), null, List.of(), recent);
             }
             if (itemCount > VOCABULARY_ITEMS_PER_LESSON) {
                 LOG.warning("VOCABULARY_LESSON_INVALID_COUNT lesson=" + lesson.getId()
                         + " count=" + itemCount + " expected=" + VOCABULARY_ITEMS_PER_LESSON);
             }
-            return toLesson(lesson);
+            return new TodayPlan(date, toLesson(lesson), null, 0, List.of(), null, null, null, List.of(), List.of());
         }
 
         EnglishLevel level = Optional.ofNullable(profiles.findById(userId)
@@ -116,42 +175,37 @@ public class VocabularyService {
         VocabularyCategory category = VocabularyCategory.values()[Math.floorMod(
                 Objects.hash(userId, date), VocabularyCategory.values().length)];
         OffsetDateTime now = reviewScheduler.now();
-        var reviews = dueReviewSources(userId, category, now);
+        var reviews = dueReviewSources(userId, category, now).stream()
+                .map(source -> new ReviewSource(source.getVocabularyWord().getId(), source.getWord(),
+                        source.getTranslation(), source.getExample(), source.getExampleTranslation())).toList();
         var recent = lessons.findRecentWords(userId, PageRequest.of(0, RECENT_WORD_LIMIT));
-        var reviewWords = reviews.stream().map(item -> normalizeWord(item.getWord())).filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toSet());
-        var generated = generateNewWords(userId, level, category, VOCABULARY_ITEMS_PER_LESSON - reviews.size(),
-                recent, reviewWords);
-        var lesson = new VocabularyLessonEntity(UUID.randomUUID(), userId, date, level, category,
-                now);
+        return new TodayPlan(date, null, null, 0, List.of(), level, category, now, reviews, recent);
+    }
+
+    private Lesson persistToday(UUID userId, TodayPlan plan, List<Generated> generated) {
+        users.findByIdForUpdate(userId).orElseThrow(() -> new NoSuchElementException("User not found"));
+        var existing = lessons.findByUserIdAndLessonDate(userId, plan.date());
+        if (existing.isPresent()) return toLesson(existing.get());
+        var lesson = new VocabularyLessonEntity(UUID.randomUUID(), userId, plan.date(),
+                plan.level(), plan.category(), plan.now());
         OffsetDateTime seenAt = lesson.getCreatedAt();
         int position = 1;
-        for (var source : reviews) {
-            lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, position++, source.getWord(),
-                    source.getTranslation(), source.getExample(), source.getExampleTranslation(), category,
-                    source.getVocabularyWord(), true));
+        for (var source : plan.reviews()) {
+            var vocabularyWord = vocabularyWords.findById(source.vocabularyWordId())
+                    .orElseThrow(() -> new IllegalStateException("Vocabulary review word disappeared"));
+            lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, position++, source.word(),
+                    source.translation(), source.example(), source.exampleTranslation(), plan.category(),
+                    vocabularyWord, true));
         }
         for (var word : generated) {
             var vocabularyWord = findOrCreateWord(userId, word.word(), seenAt);
             lesson.addItem(new VocabularyItemEntity(UUID.randomUUID(), lesson, position++, word.word(),
-                    word.translation(), word.example(), word.exampleTranslation(), category, vocabularyWord));
+                    word.translation(), word.example(), word.exampleTranslation(), plan.category(), vocabularyWord));
         }
         return toLesson(lessons.saveAndFlush(lesson));
     }
 
-    private VocabularyLessonEntity completeLegacyLesson(UUID userId, VocabularyLessonEntity lesson, int itemCount) {
-        int missing = VOCABULARY_ITEMS_PER_LESSON - itemCount;
-        var existingWords = lesson.getItems().stream().map(VocabularyItemEntity::getWord)
-                .filter(Objects::nonNull).toList();
-        var recent = lessons.findRecentWords(userId, PageRequest.of(0, RECENT_WORD_LIMIT));
-        JsonNode root = parse(complete(prompt(lesson.getEnglishLevel(), missing),
-                "Complete the existing vocabulary lesson for category " + lesson.getCategory().name()
-                        + " and level " + lesson.getEnglishLevel().name() + ". Generate only " + missing
-                        + " additional entries. Existing lesson words to preserve and never repeat: "
-                        + existingWords + ". Avoid these recently studied words unless needed for meaningful review: " + recent));
-        var generated = parseWords(root, missing, existingWords.stream()
-                .map(VocabularyService::normalizeWord).filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toSet()));
+    private VocabularyLessonEntity completeLegacyLesson(UUID userId, VocabularyLessonEntity lesson, List<Generated> generated) {
         int nextPosition = lesson.getItems().stream().mapToInt(VocabularyItemEntity::getPosition).max().orElse(0) + 1;
         OffsetDateTime seenAt = reviewScheduler.now();
         for (var word : generated) {
@@ -166,7 +220,10 @@ public class VocabularyService {
     public QuizResult submitQuiz(UUID userId, UUID lessonId, List<QuizAnswer> answers) {
         var lesson = requireForUpdate(userId, lessonId);
         if (lesson.isQuizCompleted()) {
-            return new QuizResult(lesson.getQuizScore(), QUIZ_QUESTION_COUNT, progress(lesson));
+            // Keep the historical total for lessons completed before V33,
+            // whose persisted score may still reflect the five-question quiz.
+            int total = lesson.getQuizScore() != null && lesson.getQuizScore() > QUIZ_QUESTION_COUNT ? 5 : QUIZ_QUESTION_COUNT;
+            return new QuizResult(lesson.getQuizScore(), total, progress(lesson));
         }
         if (answers == null || answers.size() != QUIZ_QUESTION_COUNT) {
             throw new IllegalArgumentException("Invalid vocabulary quiz answers");
@@ -200,22 +257,28 @@ public class VocabularyService {
         return new QuizResult(score, QUIZ_QUESTION_COUNT, progress(lesson));
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Evaluation evaluate(UUID userId, UUID lessonId, UUID wordId, String sentence) {
         if (sentence == null || sentence.isBlank() || sentence.length() > MAX_SENTENCE_LENGTH) {
             throw new IllegalArgumentException("Invalid sentence");
         }
-        var lesson = requireForUpdate(userId, lessonId);
-        if (!lesson.isQuizCompleted()) throw new IllegalStateException("Vocabulary quiz must be completed first");
-        if (lesson.isWritingCompleted()) throw new IllegalStateException("Vocabulary writing is already completed");
-        var item = lesson.getItems().stream().filter(value -> value.getId().equals(wordId)).findFirst()
-                .orElseThrow(() -> new NoSuchElementException("Vocabulary word not found"));
+        return localLocks.run(lessonId, () -> evaluateWithoutLongTransaction(userId, lessonId, wordId, sentence));
+    }
+
+    private Evaluation evaluateWithoutLongTransaction(UUID userId, UUID lessonId, UUID wordId, String sentence) {
+        String word = shortTransaction(() -> {
+            var lesson = requireForUpdate(userId, lessonId);
+            if (!lesson.isQuizCompleted()) throw new IllegalStateException("Vocabulary quiz must be completed first");
+            if (lesson.isWritingCompleted()) throw new IllegalStateException("Vocabulary writing is already completed");
+            return lesson.getItems().stream().filter(value -> value.getId().equals(wordId)).findFirst()
+                    .orElseThrow(() -> new NoSuchElementException("Vocabulary word not found")).getWord();
+        });
         JsonNode root = parse(complete("Evaluate an English learner sentence using the target word '"
-                        + item.getWord()
+                        + word
                         + "'. Return ONLY JSON with status CORRECT, NEEDS_IMPROVEMENT or INCORRECT, "
                         + "correctedSentence, explanation in Brazilian Portuguese, and optional alternative in English. "
                         + "Evaluate grammar, naturalness and correct word use at the learner level. Do not evaluate Portuguese.",
-                "Target word: " + item.getWord() + "\nSentence: " + sentence));
+                "Target word: " + word + "\nSentence: " + sentence));
         String status = string(root, "status");
         if (!Set.of("CORRECT", "NEEDS_IMPROVEMENT", "INCORRECT").contains(status)
                 || string(root, "explanation") == null || string(root, "explanation").isBlank()) {
@@ -223,10 +286,21 @@ public class VocabularyService {
         }
         // NEEDS_IMPROVEMENT remains conservative negative evidence, matching the prior counter behavior.
         boolean correct = status.equals("CORRECT");
-        item.record(reviewScheduler.record(item.getStatus(), item.getVocabularyWord().getReviewStage(), correct));
-        lesson.completeWriting(reviewScheduler.now());
-        return new Evaluation(status, string(root, "correctedSentence"), string(root, "explanation"),
-                string(root, "alternative"), progress(lesson));
+        return shortTransaction(() -> {
+            var lesson = requireForUpdate(userId, lessonId);
+            if (!lesson.isQuizCompleted()) throw new IllegalStateException("Vocabulary quiz must be completed first");
+            if (lesson.isWritingCompleted()) throw new IllegalStateException("Vocabulary writing is already completed");
+            var item = lesson.getItems().stream().filter(value -> value.getId().equals(wordId)).findFirst()
+                    .orElseThrow(() -> new NoSuchElementException("Vocabulary word not found"));
+            item.record(reviewScheduler.record(item.getStatus(), item.getVocabularyWord().getReviewStage(), correct));
+            lesson.completeWriting(reviewScheduler.now());
+            return new Evaluation(status, string(root, "correctedSentence"), string(root, "explanation"),
+                    string(root, "alternative"), progress(lesson));
+        });
+    }
+
+    private <T> T shortTransaction(Supplier<T> work) {
+        return writes == null ? work.get() : writes.execute(ignored -> work.get());
     }
 
     private VocabularyLessonEntity requireForUpdate(UUID userId, UUID lessonId) {

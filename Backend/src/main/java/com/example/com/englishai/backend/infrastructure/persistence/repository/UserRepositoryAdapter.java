@@ -2,6 +2,8 @@ package com.example.com.englishai.backend.infrastructure.persistence.repository;
 
 import com.example.com.englishai.backend.application.ports.UserRepository;
 import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
 import com.example.com.englishai.backend.domain.user.User;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.mapper.UserMapper;
@@ -48,22 +50,29 @@ public class UserRepositoryAdapter implements UserRepository {
 
     @Override
     public Optional<User> findByEmail(String email) {
-        return userJpaRepository.findByEmail(email)
-                .map(userMapper::toDomain);
+        return findSingleByNormalizedEmail(email, false);
     }
 
     @Override
     public Optional<User> findByEmailForUpdate(String email) {
-        return userJpaRepository.findByEmailForUpdate(email).map(userMapper::toDomain);
+        return findSingleByNormalizedEmail(email, true);
     }
 
     @Override
     public boolean existsByEmail(String email) {
-        return userJpaRepository.existsByEmail(email);
+        return !userJpaRepository.findAllByNormalizedEmail(EmailAddress.normalize(email)).isEmpty();
     }
 
     @Override
     public boolean existsByUsername(String username) {
         return userJpaRepository.existsByUsername(username);
+    }
+
+    private Optional<User> findSingleByNormalizedEmail(String email, boolean lock) {
+        var matches = lock
+                ? userJpaRepository.findAllByNormalizedEmailForUpdate(EmailAddress.normalize(email))
+                : userJpaRepository.findAllByNormalizedEmail(EmailAddress.normalize(email));
+        if (matches.size() > 1) throw new AmbiguousEmailAddressException();
+        return matches.stream().findFirst().map(userMapper::toDomain);
     }
 }

@@ -29,7 +29,21 @@ class ProgressControllerTest {
     @Test void defaultsToAllTimeAndUsesPrincipal() throws Exception {
         when(service.get(user,ProgressPeriod.ALL_TIME)).thenReturn(empty());
         mvc.perform(get("/api/v1/progress").header("Authorization","Bearer test"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.period").value("ALL_TIME"));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.period").value("ALL_TIME"))
+            .andExpect(jsonPath("$.vocabulary.totalWords").value(0))
+            .andExpect(jsonPath("$.vocabulary.newCount").value(0))
+            .andExpect(jsonPath("$.vocabulary.reviewingCount").value(0))
+            .andExpect(jsonPath("$.vocabulary.learnedCount").value(0))
+            .andExpect(jsonPath("$.vocabulary.masteredCount").value(0))
+            .andExpect(jsonPath("$.vocabulary.learningCount").doesNotExist())
+            .andExpect(jsonPath("$.dailyGoal.completed").value(0))
+            .andExpect(jsonPath("$.dailyGoal.total").value(3))
+            .andExpect(jsonPath("$.dailyGoal.goalCompleted").value(false))
+            .andExpect(jsonPath("$.weeklyGoals.weekStart").value("2026-09-14"))
+            .andExpect(jsonPath("$.weeklyGoals.weekEnd").value("2026-09-20"))
+            .andExpect(jsonPath("$.weeklyGoals.completedDays").value(0))
+            .andExpect(jsonPath("$.weeklyGoals.totalDays").value(7))
+            .andExpect(jsonPath("$.weeklyGoals.days.length()").value(7));
         verify(service).get(user,ProgressPeriod.ALL_TIME);
     }
     @Test void acceptsPeriodAndTimeline() throws Exception {
@@ -40,5 +54,9 @@ class ProgressControllerTest {
     }
     @Test void invalidPeriodIsBadRequest() throws Exception {assertThat(mvc.perform(get("/api/v1/progress?period=UNKNOWN").header("Authorization","Bearer test")).andReturn().getResponse().getStatus()).isEqualTo(400);verifyNoInteractions(service);}
     private ProgressService.ProgressResponse empty(){return empty(ProgressPeriod.ALL_TIME);}
-    private ProgressService.ProgressResponse empty(ProgressPeriod period){return new ProgressService.ProgressResponse(period,null,Instant.parse("2026-09-16T12:00:00Z"),new ProgressService.Overview(0,0,0,0),new ProgressService.ConversationProgress(0,0,0,null,null,null,null,null,null,List.of()),new ProgressService.ReadingProgress(0,0,0,null,null,List.of()),new ProgressService.VocabularyProgress(0,0,0,0,0,0,0,0),null);}
+    private ProgressService.ProgressResponse empty(ProgressPeriod period){
+        var emptyDay=new ProgressService.DailyGoal(java.time.LocalDate.of(2026,9,16),0,3,new ProgressService.DailyGoalItem(false),new ProgressService.DailyGoalItem(false),new ProgressService.DailyGoalItem(false),false);
+        var days=java.util.stream.IntStream.range(0,7).mapToObj(index->new ProgressService.DailyGoal(java.time.LocalDate.of(2026,9,14).plusDays(index),0,3,new ProgressService.DailyGoalItem(false),new ProgressService.DailyGoalItem(false),new ProgressService.DailyGoalItem(false),false)).toList();
+        return new ProgressService.ProgressResponse(period,null,Instant.parse("2026-09-16T12:00:00Z"),new ProgressService.Overview(0,0,0,0),new ProgressService.ConversationProgress(0,0,0,null,null,null,null,null,null,null,List.of()),new ProgressService.ReadingProgress(0,0,0,null,null,List.of()),new ProgressService.VocabularyProgress(0,0,0,0,0,0,0,0),null,emptyDay,new ProgressService.WeeklyGoals(java.time.LocalDate.of(2026,9,14),java.time.LocalDate.of(2026,9,20),0,7,days));
+    }
 }

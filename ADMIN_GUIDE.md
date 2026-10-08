@@ -20,6 +20,10 @@ Defina `ADMIN_BOOTSTRAP_EMAIL` para o email de um usuário já existente e reini
 
 Sirva `admin-ui/` em um servidor web e use uma sessão autenticada de administrador. O painel mantém tokens em `sessionStorage` usando as chaves `englishai_admin_access_token` e `englishai_admin_refresh_token`; eles são independentes da `dev-auth-ui`. Usuários comuns recebem 403 no Backend mesmo que conheçam as rotas.
 
+Publique somente `admin-ui/`, por HTTPS, em uma origem dedicada, sem conteúdo ou scripts de terceiros além do Google Identity Services já usado no login. Configure o servidor que entrega os arquivos estáticos com `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` e `X-Frame-Options: DENY` (ou `frame-ancestors 'none'` em CSP). Restrinja CORS no Backend à origem exata do painel. O servidor estático não faz parte deste repositório; valide esses headers no deploy real.
+
+O logout remove os dois tokens de `sessionStorage`, mas um script executado na mesma origem ainda poderia lê-los durante a sessão. Por isso, trate prevenção de XSS e proteção da origem como requisitos de publicação. Não use `localStorage` para tokens. Uma migração para cookie HttpOnly exige decisão conjunta sobre autenticação, CSRF e CORS, fora do contrato atual. Uma CSP precisa ser ajustada e testada no servidor de hospedagem com a origem real da API e os recursos do Google Identity Services; não aplique uma política genérica que bloqueie login ou requisições.
+
 ## Login
 
 O `admin-ui` aceita login local por email e senha e login Google/OIDC através do mesmo fluxo do produto: `POST /api/v1/auth/google/nonce`, seguido de `POST /api/v1/auth/google` com a credencial retornada pelo Google Identity Services. A role é independente do provedor: contas locais e contas Google podem ser USER ou ADMIN. Depois da autenticação, o painel valida `/api/v1/users/me` e acessa o dashboard administrativo; o Backend continua sendo a autoridade final.
@@ -42,6 +46,8 @@ Configure o primeiro superadministrador com `SUPER_ADMIN_BOOTSTRAP_EMAIL=admin@e
 
 O endpoint de usuários é `GET /api/v1/admin/users` e a alteração é `PATCH /api/v1/admin/users/{id}/role`. Ambas as operações exigem SUPER_ADMIN. O catálogo continua exigindo ADMIN ou SUPER_ADMIN.
 
+A tela de usuários consulta 25 registros por página, com botões Anterior/Próxima. A busca por nome ou email é aplicada no banco e reinicia na primeira página. A API aceita `search`, `page` (a partir de zero) e `size` (1–100); sem `page`, mantém a lista completa para clientes existentes.
+
 ## Creating the first SUPER_ADMIN
 
 1. Create and verify the account through the normal local or Google/OIDC flow.
@@ -62,6 +68,8 @@ A tela de Cenários permite criar e editar todos os metadados administrativos, i
 ## Image replacement
 
 When an administrator replaces an avatar image, the Backend stores the new file first, persists the new asset reference, and then removes the old file when it is not shared by another catalog entry. Cleanup is best effort: a cleanup failure does not invalidate the new image. If persistence fails, the new file is removed as compensation and the previous image remains active.
+
+Runtime images are stored outside PostgreSQL. In production, set `AVATAR_IMAGE_STORAGE_DIR` to an existing writable absolute directory on persistent storage and include it in backups. Disabling an avatar is reversible and does not delete its file. Uploads use server-generated asset names; supplied filenames do not select filesystem paths. The initial single-instance filesystem setup is not suitable for multiple instances with separate local disks.
 
 ## Cen?rios personalizados por perfil
 

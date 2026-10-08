@@ -5,6 +5,7 @@ import com.example.com.englishai.backend.infrastructure.security.AuthenticationR
 import com.example.com.englishai.backend.infrastructure.security.RateLimitKeyGenerator;
 import com.example.com.englishai.backend.presentation.rest.auth.AuthController;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginRequest;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.ValidatePasswordResetCodeRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
@@ -24,6 +25,13 @@ class AuthenticationRateLimitBodyAdviceTest {
     void shouldApplyOnlyToAuthControllerLogin() throws Exception {
         Method login = AuthController.class.getMethod("login", LoginRequest.class);
         assertThat(advice.supports(new MethodParameter(login, 0), LoginRequest.class,
+                MappingJackson2HttpMessageConverter.class)).isTrue();
+    }
+
+    @Test
+    void shouldApplyToPasswordResetCodeValidation() throws Exception {
+        Method validation = AuthController.class.getMethod("validateResetCode", ValidatePasswordResetCodeRequest.class);
+        assertThat(advice.supports(new MethodParameter(validation, 0), ValidatePasswordResetCodeRequest.class,
                 MappingJackson2HttpMessageConverter.class)).isTrue();
     }
 

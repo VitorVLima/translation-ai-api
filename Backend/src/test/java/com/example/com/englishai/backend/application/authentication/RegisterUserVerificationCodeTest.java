@@ -36,7 +36,7 @@ class RegisterUserVerificationCodeTest {
 
         RegisterUser register = new RegisterUser(new CreateUser(users), passwords, generator, hasher, codes,
                 sender, Duration.ofMinutes(10), 5, Clock.fixed(Instant.parse("2026-01-01T12:00:00Z"), ZoneOffset.UTC));
-        register.execute("new@example.com", "new-user", "password");
+        register.execute("new@example.com", "password");
 
         var captor = org.mockito.ArgumentCaptor.forClass(EmailVerificationCode.class);
         verify(codes).save(captor.capture());
@@ -64,7 +64,7 @@ class RegisterUserVerificationCodeTest {
 
         RegisterUser register = new RegisterUser(new CreateUser(users), passwords, generator, hasher, codes,
                 sender, Duration.ofMinutes(10), 5, Clock.systemUTC());
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> register.execute("duplicate@example.com", "user", "password"))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> register.execute("duplicate@example.com", "password"))
                 .isInstanceOf(RuntimeException.class);
         verifyNoInteractions(generator, hasher, codes, sender);
     }

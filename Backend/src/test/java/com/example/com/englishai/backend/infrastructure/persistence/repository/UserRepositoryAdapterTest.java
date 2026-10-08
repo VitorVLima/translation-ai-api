@@ -1,6 +1,7 @@
 package com.example.com.englishai.backend.infrastructure.persistence.repository;
 
 import com.example.com.englishai.backend.application.user.exception.UserAlreadyExistsException;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
 import com.example.com.englishai.backend.domain.user.User;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
 import com.example.com.englishai.backend.infrastructure.persistence.mapper.UserMapper;
@@ -9,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
@@ -36,6 +38,17 @@ class UserRepositoryAdapterTest {
         verifyNoMoreInteractions(jpaRepository);
         verify(mapper).toEntity(user);
         verifyNoMoreInteractions(mapper);
+    }
+
+    @Test
+    void rejectsAmbiguousLegacyCaseInsensitiveEmailMatches() {
+        UserEntity first = mock(UserEntity.class);
+        UserEntity second = mock(UserEntity.class);
+        when(jpaRepository.findAllByNormalizedEmail("duplicate@example.com"))
+                .thenReturn(List.of(first, second));
+
+        assertThatThrownBy(() -> adapter.findByEmail("Duplicate@Example.com"))
+                .isInstanceOf(AmbiguousEmailAddressException.class);
     }
 
     private User user() {

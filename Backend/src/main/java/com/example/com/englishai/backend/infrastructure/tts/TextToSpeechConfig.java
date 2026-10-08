@@ -14,11 +14,12 @@ public class TextToSpeechConfig {
             @Value("${speech.tts.provider:piper}") String provider,
             @Value("${speech.tts.piper.base-url:http://127.0.0.1:8002}") String baseUrl,
             @Value("${speech.tts.connect-timeout-seconds:5}") long connectTimeout,
-            @Value("${speech.tts.response-timeout-seconds:60}") long responseTimeout) {
+            @Value("${speech.tts.response-timeout-seconds:60}") long responseTimeout,
+            @Value("${speech.tts.max-audio-mb:20}") int maxAudioMb) {
         if (connectTimeout <= 0 || responseTimeout <= 0) throw new IllegalArgumentException("TTS timeouts must be positive");
         if (provider == null) throw new IllegalArgumentException("TTS_PROVIDER is required");
         return switch (provider.trim().toLowerCase(java.util.Locale.ROOT)) {
-            case "piper" -> new PiperTextToSpeechProvider(baseUrl, Duration.ofSeconds(connectTimeout), Duration.ofSeconds(responseTimeout));
+            case "piper" -> new PiperTextToSpeechProvider(baseUrl, Duration.ofSeconds(connectTimeout), Duration.ofSeconds(responseTimeout), Math.multiplyExact(maxAudioMb, 1024 * 1024));
             default -> throw new IllegalArgumentException("Unsupported TTS_PROVIDER");
         };
     }

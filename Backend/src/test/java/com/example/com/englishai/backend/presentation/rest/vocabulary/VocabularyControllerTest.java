@@ -70,12 +70,11 @@ class VocabularyControllerTest {
     }
 
     @Test
-    void submitsExactlyFiveQuizAnswersForTheAuthenticatedUser() throws Exception {
+    void submitsExactlyThreeQuizAnswersForTheAuthenticatedUser() throws Exception {
         UUID lessonId = UUID.randomUUID();
-        List<UUID> words = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                UUID.randomUUID(), UUID.randomUUID());
-        var progress = new VocabularyService.LessonProgress(true, 5, false, null);
-        when(service.submitQuiz(eq(user), eq(lessonId), any())).thenReturn(new VocabularyService.QuizResult(5, 5, progress));
+        List<UUID> words = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        var progress = new VocabularyService.LessonProgress(true, 3, false, null);
+        when(service.submitQuiz(eq(user), eq(lessonId), any())).thenReturn(new VocabularyService.QuizResult(3, 3, progress));
         String answers = words.stream().map(word -> "{\"wordId\":\"" + word
                 + "\",\"selectedWordId\":\"" + word + "\"}").reduce((left, right) -> left + "," + right).orElseThrow();
 
@@ -83,13 +82,13 @@ class VocabularyControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"lessonId\":\"" + lessonId + "\",\"answers\":[" + answers + "]}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.score").value(5))
-                .andExpect(jsonPath("$.total").value(5));
+                .andExpect(jsonPath("$.score").value(3))
+                .andExpect(jsonPath("$.total").value(3));
         verify(service).submitQuiz(eq(user), eq(lessonId), any());
     }
 
     @Test
-    void rejectsQuizWithAnythingOtherThanFiveAnswers() throws Exception {
+    void rejectsQuizWithAnythingOtherThanThreeAnswers() throws Exception {
         UUID lessonId = UUID.randomUUID();
         UUID word = UUID.randomUUID();
         String answer = "{\"wordId\":\"" + word + "\",\"selectedWordId\":\"" + word + "\"}";

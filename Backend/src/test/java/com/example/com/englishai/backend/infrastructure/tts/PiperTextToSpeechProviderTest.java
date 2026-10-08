@@ -12,6 +12,65 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.*;
 
 class PiperTextToSpeechProviderTest {
+    @Test void rejectsOversizedWavWithoutRetainingAnUnboundedResponse() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/synthesize", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Content-Type", "audio/wav");
+            exchange.sendResponseHeaders(200, 5);
+            try { exchange.getResponseBody().write(new byte[5]); } catch (java.io.IOException ignored) { }
+            exchange.close();
+        });
+        server.start();
+        try {
+            var provider = new PiperTextToSpeechProvider("http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1), Duration.ofSeconds(2), 4);
+            assertThatThrownBy(() -> provider.synthesize(new TextToSpeechRequest("Hello", Language.ENGLISH)))
+                    .isInstanceOf(TextToSpeechProviderException.class);
+        } finally { server.stop(0); }
+    }
+    @Test void boundsChunkedWavEvenWithoutContentLength() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/synthesize", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Content-Type", "audio/wav");
+            exchange.sendResponseHeaders(200, 0);
+            try { exchange.getResponseBody().write(new byte[5]); } catch (java.io.IOException ignored) { }
+            exchange.close();
+        });
+        server.start();
+        try {
+            var provider = new PiperTextToSpeechProvider("http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1), Duration.ofSeconds(2), 4);
+            assertThatThrownBy(() -> provider.synthesize(new TextToSpeechRequest("Hello", Language.ENGLISH)))
+                    .isInstanceOf(TextToSpeechProviderException.class);
+        } finally { server.stop(0); }
+    }
+    @Test void slowChunkedWavCannotHoldTheRequestPastItsDeadline() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/synthesize", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Content-Type", "audio/wav");
+            exchange.sendResponseHeaders(200, 0);
+            try {
+                exchange.getResponseBody().write(1);
+                exchange.getResponseBody().flush();
+                Thread.sleep(800);
+                exchange.getResponseBody().write(2);
+            } catch (java.io.IOException | InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            finally { exchange.close(); }
+        });
+        server.start();
+        try {
+            var provider = new PiperTextToSpeechProvider("http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1), Duration.ofMillis(200), 10);
+            long started = System.nanoTime();
+            assertThatThrownBy(() -> provider.synthesize(new TextToSpeechRequest("Hello", Language.ENGLISH)))
+                    .isInstanceOf(TextToSpeechProviderException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(700));
+            provider.close();
+        } finally { server.stop(0); }
+    }
     @Test void adapterForwardsNeutralSettingsAndReadsSafeVoiceMetadata() throws Exception {
         var body = new AtomicReference<String>();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

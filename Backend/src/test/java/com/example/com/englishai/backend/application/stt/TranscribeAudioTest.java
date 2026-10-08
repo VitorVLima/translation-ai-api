@@ -30,6 +30,16 @@ class TranscribeAudioTest {
         assertThrows(SpeechToTextFileTooLargeException.class, () -> useCase.execute(new TranscribeAudioCommand(new byte[]{1, 2}, "a.wav", "audio/wav", null)));
     }
 
+    @Test void acceptsExactUploadLimitAndRejectsOneByteAboveIt() {
+        var fake = new FakeProvider();
+        var useCase = new TranscribeAudio(fake, 4);
+        assertNotNull(useCase.execute(new TranscribeAudioCommand(new byte[4], "a.wav", "audio/wav", null)).text());
+        assertEquals(4, fake.request.audio().length);
+        assertThrows(SpeechToTextFileTooLargeException.class,
+                () -> useCase.execute(new TranscribeAudioCommand(new byte[5], "a.wav", "audio/wav", null)));
+        assertEquals(4, fake.request.audio().length);
+    }
+
     @Test
     void rejectsEmptyProviderResult() {
         var useCase = new TranscribeAudio(request -> new SpeechToTextResult(" ", Language.ENGLISH), 10);

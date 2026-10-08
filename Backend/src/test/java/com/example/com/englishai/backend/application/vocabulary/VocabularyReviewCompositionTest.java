@@ -156,6 +156,7 @@ class VocabularyReviewCompositionTest {
         for (int index = 1; index <= count; index++) {
             var progress = new UserVocabularyWordEntity(UUID.randomUUID(), user, "review-" + index,
                     "review-" + index, now);
+            when(words.findById(progress.getId())).thenReturn(Optional.of(progress));
             historical.addItem(new VocabularyItemEntity(UUID.randomUUID(), historical, index, progress.getWord(),
                     "tradução", "Example.", "Exemplo.", category, progress));
             result.add(historical.getItems().getLast());

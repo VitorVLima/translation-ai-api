@@ -24,6 +24,7 @@ import com.example.com.englishai.backend.presentation.rest.auth.dto.LogoutReques
 import com.example.com.englishai.backend.presentation.rest.auth.dto.VerifyEmailRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResendEmailVerificationRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResetPasswordRequest;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.ValidatePasswordResetCodeRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.GoogleLoginRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -112,6 +113,14 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/validate-reset-code")
+    public ResponseEntity<Void> validateResetCode(@Valid @RequestBody ValidatePasswordResetCodeRequest request) {
+        var useCase = resetPassword.getIfAvailable();
+        if (useCase == null) throw new IllegalStateException("Password reset is unavailable");
+        useCase.validateCode(request.email(), request.code());
+        return ResponseEntity.noContent().header("Cache-Control", "no-store").build();
+    }
+
     @PostMapping("/google")
     public ResponseEntity<LoginResponse> google(@Valid @RequestBody GoogleLoginRequest request) {
         var useCase = loginWithGoogle.getIfAvailable();
@@ -168,7 +177,6 @@ public class AuthController {
 
         User user = registerUser.execute(
                 request.email(),
-                request.username(),
                 request.password()
         );
 

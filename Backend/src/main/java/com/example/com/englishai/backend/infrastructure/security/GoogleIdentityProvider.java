@@ -24,6 +24,9 @@ import java.util.Date;
 import java.time.Clock;
 import java.time.Duration;
 import com.nimbusds.jose.jwk.source.JWKSource;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public class GoogleIdentityProvider implements ExternalIdentityProvider {
     private static final String GOOGLE_ISSUER = "https://accounts.google.com";
@@ -75,7 +78,7 @@ public class GoogleIdentityProvider implements ExternalIdentityProvider {
         try {
             JWTClaimsSet claims = processor.process(credential, null);
             if (claims.getStringClaim("nonce") == null) { debug("GOOGLE_NONCE_MISSING"); throw new InvalidExternalIdentityException(); }
-            if (!nonce.equals(claims.getStringClaim("nonce"))) { debug("GOOGLE_NONCE_MISMATCH"); throw new InvalidExternalIdentityException(); }
+            if (!nonceMatches(nonce, claims.getStringClaim("nonce"))) { debug("GOOGLE_NONCE_MISMATCH"); throw new InvalidExternalIdentityException(); }
             String subject = claims.getSubject(); String email = claims.getStringClaim("email");
             Boolean verified = claims.getBooleanClaim("email_verified");
             if (subject == null || subject.isBlank()) { debug("GOOGLE_SUB_MISSING"); throw new InvalidExternalIdentityException(); }
@@ -88,6 +91,18 @@ public class GoogleIdentityProvider implements ExternalIdentityProvider {
     }
 
     private static void debug(String category) { log.debug("Google identity validation rejected: {}", category); }
+
+    private static boolean nonceMatches(String expected, String actual) {
+        if (expected.equals(actual)) return true;
+        try {
+            var digest = MessageDigest.getInstance("SHA-256").digest(expected.getBytes(StandardCharsets.UTF_8));
+            var hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) hex.append(String.format("%02x", value));
+            return hex.toString().equalsIgnoreCase(actual);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
 
     private static String category(Exception e) {
         String type = e.getClass().getSimpleName();

@@ -67,6 +67,7 @@ public class AuthenticationRateLimitFilter extends OncePerRequestFilter {
         else if (path.equals("/api/v1/auth/verify-email")) { bucket = "verify-email:ip:"; capacity = verifyEmailCapacity; window = verifyEmailWindow; }
         else if (path.equals("/api/v1/auth/resend-verification")) { bucket = "resend-verification:ip:"; capacity = resendCapacity; window = resendWindow; }
         else if (path.equals("/api/v1/auth/reset-password")) { bucket = "reset-password:ip:"; capacity = resetCapacity; window = resetWindow; }
+        else if (path.equals("/api/v1/auth/validate-reset-code")) { bucket = "reset-password:ip:"; capacity = resetCapacity; window = resetWindow; }
         else if (path.equals("/api/v1/auth/google")) { bucket = "google-login:ip:"; capacity = googleCapacity; window = googleWindow; }
         if (bucket == null) { chain.doFilter(request, response); return; }
         var decision = service.tryConsume(bucket + ipResolver.resolve(request), capacity, window);

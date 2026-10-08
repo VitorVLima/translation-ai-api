@@ -148,7 +148,7 @@ class VocabularyServiceTest {
         assertThat(result.words()).hasSize(10);
         assertThat(result.words().subList(0, 5)).extracting(VocabularyService.Word::id)
                 .containsExactlyElementsOf(originalIds);
-        assertThat(existing.getItems().get(0).getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(existing.getItems().get(0).getStatus()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(existing.getItems().get(0).getCorrectCount()).isEqualTo(1);
         assertThat(existing.getItems().get(1).getIncorrectCount()).isEqualTo(1);
         assertThat(result.progress().quizCompleted()).isTrue();
@@ -236,7 +236,7 @@ class VocabularyServiceTest {
         assertThat(existing.getItems()).hasSize(10);
         assertThat(existing.getItems().get(9).getVocabularyWord()).isSameAs(progress);
         assertThat(existing.getItems().get(9).getVocabularyWord()).isSameAs(progress);
-        assertThat(existing.getItems().get(9).getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(existing.getItems().get(9).getStatus()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(existing.getItems().get(9).getCorrectCount()).isEqualTo(1);
         verify(vocabularyWords).insertIfAbsent(any(), eq(user), eq("hungry"), eq("hungry"), any());
     }
@@ -278,7 +278,7 @@ class VocabularyServiceTest {
         record(progress, true);
         record(progress, false);
 
-        assertThat(progress.getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(progress.getStatus()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
         assertThat(progress.getCorrectCount()).isEqualTo(1);
         assertThat(progress.getIncorrectCount()).isEqualTo(1);
     }
@@ -289,7 +289,7 @@ class VocabularyServiceTest {
 
         service.today(user);
 
-        verify(users).findByIdForUpdate(user);
+        verify(users, times(2)).findByIdForUpdate(user);
         verify(lessons).saveAndFlush(any());
     }
 
@@ -304,7 +304,7 @@ class VocabularyServiceTest {
     }
 
     @Test
-    void quizUsesExactlyFiveOwnedWordsAndPersistsTheComputedScore() {
+    void quizUsesExactlyThreeOwnedWordsAndPersistsTheComputedScore() {
         var lesson = lesson(10);
         when(lessons.findForUpdateByIdAndUserId(lesson.getId(), user)).thenReturn(Optional.of(lesson));
         var answers = quizAnswers(lesson, 3);
@@ -312,28 +312,28 @@ class VocabularyServiceTest {
         var result = service.submitQuiz(user, lesson.getId(), answers);
 
         assertThat(result.score()).isEqualTo(3);
-        assertThat(result.total()).isEqualTo(5);
+        assertThat(result.total()).isEqualTo(3);
         assertThat(result.progress().quizCompleted()).isTrue();
         assertThat(result.progress().writingCompleted()).isFalse();
         assertThat(result.progress().completedAt()).isNull();
         assertThat(lesson.getQuizScore()).isEqualTo(3);
-        assertThat(lesson.getItems().subList(0, 5)).extracting(VocabularyItemEntity::getStatus)
-                .containsOnly(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(lesson.getItems().subList(0, 3)).extracting(VocabularyItemEntity::getStatus)
+                .containsOnly(VocabularyService.ProgressStatus.REVIEWING);
     }
 
     @Test
     void quizRejectsWrongCountForeignQuestionsAndForeignOwnership() {
         var lesson = lesson(10);
         when(lessons.findForUpdateByIdAndUserId(lesson.getId(), user)).thenReturn(Optional.of(lesson));
-        assertThatThrownBy(() -> service.submitQuiz(user, lesson.getId(), quizAnswers(lesson, 5).subList(0, 4)))
+        assertThatThrownBy(() -> service.submitQuiz(user, lesson.getId(), quizAnswers(lesson, 3).subList(0, 2)))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        var answers = new ArrayList<>(quizAnswers(lesson, 5));
+        var answers = new ArrayList<>(quizAnswers(lesson, 3));
         answers.set(0, new VocabularyService.QuizAnswer(UUID.randomUUID(), lesson.getItems().get(0).getId()));
         assertThatThrownBy(() -> service.submitQuiz(user, lesson.getId(), answers))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        assertThatThrownBy(() -> service.submitQuiz(UUID.randomUUID(), lesson.getId(), quizAnswers(lesson, 5)))
+        assertThatThrownBy(() -> service.submitQuiz(UUID.randomUUID(), lesson.getId(), quizAnswers(lesson, 3)))
                 .isInstanceOf(NoSuchElementException.class);
     }
 
@@ -341,13 +341,13 @@ class VocabularyServiceTest {
     void repeatedQuizSubmissionIsIdempotentAndDoesNotChangeScoreOrCounts() {
         var lesson = lesson(10);
         when(lessons.findForUpdateByIdAndUserId(lesson.getId(), user)).thenReturn(Optional.of(lesson));
-        var first = service.submitQuiz(user, lesson.getId(), quizAnswers(lesson, 4));
+        var first = service.submitQuiz(user, lesson.getId(), quizAnswers(lesson, 3));
         int firstCorrectCount = lesson.getItems().get(0).getCorrectCount();
 
         var repeated = service.submitQuiz(user, lesson.getId(), quizAnswers(lesson, 0));
 
-        assertThat(first.score()).isEqualTo(4);
-        assertThat(repeated.score()).isEqualTo(4);
+        assertThat(first.score()).isEqualTo(3);
+        assertThat(repeated.score()).isEqualTo(3);
         assertThat(lesson.getItems().get(0).getCorrectCount()).isEqualTo(firstCorrectCount);
     }
 
@@ -367,9 +367,26 @@ class VocabularyServiceTest {
         var result = service.evaluate(user, lesson.getId(), item.getId(), "It is correct.");
 
         assertThat(result.status()).isEqualTo("CORRECT");
+        verify(provider).complete(org.mockito.ArgumentMatchers.argThat(request ->
+                request.systemPrompt().contains("explanation in Brazilian Portuguese")));
         assertThat(result.progress().writingCompleted()).isTrue();
         assertThat(result.progress().completedAt()).isNotNull();
         assertThat(lesson.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void writingExplanationIsPortugueseWhileThePracticeSentenceStaysEnglish() {
+        var lesson = lesson(10);
+        var item = lesson.getItems().get(7);
+        lesson.completeQuiz(3, OffsetDateTime.now(ZoneOffset.UTC));
+        when(lessons.findForUpdateByIdAndUserId(lesson.getId(), user)).thenReturn(Optional.of(lesson));
+        when(provider.complete(any())).thenReturn(new LlmResponse("{\"status\":\"CORRECT\",\"explanation\":\"Uso correto.\"}"));
+
+        service.evaluate(user, lesson.getId(), item.getId(), "I use this word correctly.");
+
+        verify(provider).complete(org.mockito.ArgumentMatchers.argThat(request ->
+                request.systemPrompt().contains("explanation in Brazilian Portuguese")
+                        && request.userPrompt().contains("I use this word correctly.")));
     }
 
     @Test
@@ -403,7 +420,7 @@ class VocabularyServiceTest {
         record(firstOccurrence, true);
         assertThat(firstOccurrence.getCorrectCount()).isEqualTo(1);
         assertThat(secondOccurrence.getCorrectCount()).isEqualTo(1);
-        assertThat(secondOccurrence.getStatus()).isEqualTo(VocabularyService.ProgressStatus.LEARNING);
+        assertThat(secondOccurrence.getStatus()).isEqualTo(VocabularyService.ProgressStatus.REVIEWING);
     }
 
     @Test

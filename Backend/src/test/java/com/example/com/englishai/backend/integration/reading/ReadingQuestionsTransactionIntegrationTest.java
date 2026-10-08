@@ -23,6 +23,7 @@ import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -63,7 +64,7 @@ class ReadingQuestionsTransactionIntegrationTest {
         UUID owner = UUID.randomUUID(); owners.add(owner);
         users.saveAndFlush(new UserEntity(owner, "reading-" + owner + "@test.com", "reading" + owner.toString().replace("-", ""), "hash", now, now));
         UUID activityId = UUID.randomUUID();
-        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL, "We visited a village.", now));
+        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
 
         ReadingService.Questions first = service.questionsForActivity(owner, activityId);
         ReadingService.Questions second = service.questionsForActivity(owner, activityId);
@@ -75,11 +76,103 @@ class ReadingQuestionsTransactionIntegrationTest {
         verify(provider, times(1)).complete(any());
     }
 
+    @Test void hintsForLegacyActivityArePersistedAndReusedWithoutAnotherProviderCall() {
+        UUID owner = UUID.randomUUID(); owners.add(owner);
+        users.saveAndFlush(new UserEntity(owner, "reading-hints-" + owner + "@test.com", "readinghints" + owner.toString().replace("-", ""), "hash", now, now));
+        UUID activityId = UUID.randomUUID();
+        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE,
+                ReadingTopic.TRAVEL, "A Village Visit", "We visited a village along the way.", now));
+        when(provider.complete(any())).thenReturn(new LlmResponse("{\"items\":[{\"expression\":\"along the way\","
+                + "\"explanation\":\"Nesta frase, durante o caminho.\",\"type\":\"EXPRESSION\"}]}"));
+
+        assertThat(service.hintsForActivity(owner, activityId).items()).hasSize(1);
+        assertThat(service.hintsForActivity(owner, activityId).items()).hasSize(1);
+        assertThat(service.detailForUser(owner, activityId).hints()).hasSize(1);
+        assertThat(jdbc.queryForObject("select hints::text from reading_activities where id=?", String.class, activityId))
+                .contains("along the way");
+        verify(provider, times(1)).complete(any());
+    }
+    @Test void slowHintProviderHoldsNoTransactionAndDeletedActivityIsNotRecreated() throws Exception {
+        UUID owner = UUID.randomUUID(); owners.add(owner);
+        users.saveAndFlush(new UserEntity(owner, "reading-slow-" + owner + "@test.com",
+                "readingslow" + owner.toString().replace("-", ""), "hash", now, now));
+        UUID activityId = UUID.randomUUID();
+        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.BEGINNER,
+                ReadingTopic.TRAVEL, "A Walk", "We walked along the way.", now));
+        var called = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var inTransaction = new java.util.concurrent.atomic.AtomicBoolean(true);
+        when(provider.complete(any())).thenAnswer(invocation -> {
+            inTransaction.set(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            called.countDown();
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Provider test timed out");
+            return new LlmResponse("{\"items\":[{\"expression\":\"along the way\",\"explanation\":\"Durante o caminho.\",\"type\":\"EXPRESSION\"}]}");
+        });
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var hint = pool.submit(() -> service.hintsForActivity(owner, activityId));
+            assertThat(called.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(inTransaction.get()).isFalse();
+            var deletion = pool.submit(() -> service.deleteInProgressForUser(owner, activityId));
+            deletion.get(3, TimeUnit.SECONDS);
+            release.countDown();
+            assertThatThrownBy(() -> hint.get(5, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class).hasCauseInstanceOf(NoSuchElementException.class);
+        } finally { release.countDown(); }
+        assertThat(activities.findById(activityId)).isEmpty();
+    }
+
+    @Test void oneInProgressActivityPerUserIsEnforcedByDatabaseAndReleasedAfterCompletion() {
+        UUID firstOwner = UUID.randomUUID();
+        UUID secondOwner = UUID.randomUUID();
+        owners.add(firstOwner);
+        owners.add(secondOwner);
+        users.saveAndFlush(new UserEntity(firstOwner, "reading-one-" + firstOwner + "@test.com", "readingone" + firstOwner.toString().replace("-", ""), "hash", now, now));
+        users.saveAndFlush(new UserEntity(secondOwner, "reading-two-" + secondOwner + "@test.com", "readingtwo" + secondOwner.toString().replace("-", ""), "hash", now, now));
+
+        UUID firstActivityId = UUID.randomUUID();
+        activities.saveAndFlush(new ReadingActivityEntity(firstActivityId, firstOwner, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "First title", "First", now));
+        activities.saveAndFlush(new ReadingActivityEntity(UUID.randomUUID(), secondOwner, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "Other title", "Other user", now));
+        assertThatThrownBy(() -> activities.saveAndFlush(new ReadingActivityEntity(UUID.randomUUID(), firstOwner, ConversationDifficulty.ADVANCED, ReadingTopic.WORK, "Blocked title", "Blocked", now)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        var first = activities.findById(firstActivityId).orElseThrow();
+        first.complete(3, 100, ReadingActivityEntity.ReadingActivityStatus.SUCCESS, now.plusMinutes(1));
+        activities.saveAndFlush(first);
+        assertThat(activities.saveAndFlush(new ReadingActivityEntity(UUID.randomUUID(), firstOwner, ConversationDifficulty.ADVANCED, ReadingTopic.WORK, "Released title", "Released", now.plusMinutes(2))).getUserId())
+                .isEqualTo(firstOwner);
+    }
+
+    @Test void concurrentInProgressInsertsAllowOnlyOneActivityForTheSameUser() throws Exception {
+        UUID owner = UUID.randomUUID();
+        owners.add(owner);
+        users.saveAndFlush(new UserEntity(owner, "reading-race-" + owner + "@test.com", "readingrace" + owner.toString().replace("-", ""), "hash", now, now));
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var attempts = List.of(
+                    executor.submit(() -> insertInProgress(owner, "Race A")),
+                    executor.submit(() -> insertInProgress(owner, "Race B")));
+            var successful = attempts.stream().filter(future -> {
+                try { return future.get(); } catch (Exception exception) { return false; }
+            }).count();
+            assertThat(successful).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private boolean insertInProgress(UUID owner, String text) {
+        try {
+            activities.saveAndFlush(new ReadingActivityEntity(UUID.randomUUID(), owner, ConversationDifficulty.BEGINNER, ReadingTopic.TRAVEL, "A Reading", text, now));
+            return true;
+        } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+            return false;
+        }
+    }
+
     @Test void concurrentRequestsReuseTheThreePersistedQuestions() throws Exception {
         UUID owner = UUID.randomUUID(); owners.add(owner);
         users.saveAndFlush(new UserEntity(owner, "reading-concurrent-" + owner + "@test.com", "readingc" + owner.toString().replace("-", ""), "hash", now, now));
         UUID activityId = UUID.randomUUID();
-        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL, "We visited a village.", now));
+        activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE, ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
         try (var pool = Executors.newFixedThreadPool(2)) {
             var first = pool.submit(() -> service.questionsForActivity(owner, activityId));
             var second = pool.submit(() -> service.questionsForActivity(owner, activityId));
@@ -97,7 +190,7 @@ class ReadingQuestionsTransactionIntegrationTest {
                 "readinghttp" + owner.toString().replace("-", ""), "hash", now, now));
         UUID activityId = UUID.randomUUID();
         activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE,
-                ReadingTopic.TRAVEL, "We visited a village.", now));
+                ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .post("/api/v1/reading/questions")
@@ -106,7 +199,8 @@ class ReadingQuestionsTransactionIntegrationTest {
                         .content("{\"activityId\":\"" + activityId + "\"}"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.questions").isArray())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.questions.length()").value(3));
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.questions.length()").value(3))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.questions[0].correctOption").doesNotExist());
 
         assertThat(questions.findByActivityIdOrderByQuestionNumber(activityId)).hasSize(3);
         verify(provider, times(1)).complete(any());
@@ -119,7 +213,7 @@ class ReadingQuestionsTransactionIntegrationTest {
                 "readingjwt" + owner.toString().replace("-", ""), "hash", now, now));
         UUID activityId = UUID.randomUUID();
         activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE,
-                ReadingTopic.TRAVEL, "We visited a village.", now));
+                ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
 
         String token = tokenGenerator.generate(owner);
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
@@ -145,11 +239,12 @@ class ReadingQuestionsTransactionIntegrationTest {
                 "readingrefresh" + owner.toString().replace("-", ""), "hash", now, now));
         UUID activityId = UUID.randomUUID();
         activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE,
-                ReadingTopic.TRAVEL, "We visited a village.", now));
+                ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
         UUID familyId = UUID.randomUUID();
         String rawRefresh = "reading-refresh-" + UUID.randomUUID();
-        jdbc.update("insert into refresh_token_families (id, user_id, created_at, expires_at) values (?, ?, ?, ?)", familyId, owner, now, now.plusDays(7));
-        jdbc.update("insert into refresh_tokens (id, user_id, family_id, token_hash, expires_at, created_at) values (?, ?, ?, ?, ?, ?)", UUID.randomUUID(), owner, familyId, refreshTokenHasher.hash(rawRefresh), now.plusDays(7), now);
+        var tokenIssuedAt = OffsetDateTime.now(java.time.ZoneOffset.UTC);
+        jdbc.update("insert into refresh_token_families (id, user_id, created_at, expires_at) values (?, ?, ?, ?)", familyId, owner, tokenIssuedAt, tokenIssuedAt.plusDays(7));
+        jdbc.update("insert into refresh_tokens (id, user_id, family_id, token_hash, expires_at, created_at) values (?, ?, ?, ?, ?, ?)", UUID.randomUUID(), owner, familyId, refreshTokenHasher.hash(rawRefresh), tokenIssuedAt.plusDays(7), tokenIssuedAt);
 
         String refreshBody = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\":\"" + rawRefresh + "\"}"))

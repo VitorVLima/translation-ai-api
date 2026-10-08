@@ -33,7 +33,6 @@ class RegisterUserTest {
     void shouldEncodePasswordBeforeCreatingUser() {
 
         String email = "vitor@test.com";
-        String username = "vitor";
         String rawPassword = "123456";
         String passwordHash = "hashed-password";
 
@@ -43,7 +42,7 @@ class RegisterUserTest {
         User user = new User(
                 UUID.randomUUID(),
                 email,
-                username,
+                null,
                 passwordHash,
                 OffsetDateTime.now(),
                 OffsetDateTime.now()
@@ -55,13 +54,12 @@ class RegisterUserTest {
 
         User result = registerUser.execute(
                 email,
-                username,
                 rawPassword
         );
 
         User savedUser = savedUserCaptor.getValue();
         assertThat(savedUser.getEmail()).isEqualTo(email);
-        assertThat(savedUser.getUsername()).isEqualTo(username);
+        assertThat(savedUser.getUsername()).isNull();
         assertThat(savedUser.getPasswordHash()).isEqualTo(passwordHash);
         assertThat(savedUser.getPasswordHash()).isNotEqualTo(rawPassword);
         assertThat(result.getPasswordHash()).isEqualTo(passwordHash);

@@ -42,4 +42,20 @@ public class SmtpEmailSender implements EmailSender {
             throw new EmailDeliveryException();
         }
     }
+
+    @Override
+    public void sendPasswordResetCode(String recipientEmail, String code) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(from);
+        message.setTo(recipientEmail);
+        message.setSubject("EnglishAI - Recuperação de senha");
+        message.setText("Seu código para redefinir a senha é:\n\n" + code
+                + "\n\nEste código expira em 10 minutos.\n\n"
+                + "Se você não solicitou a recuperação de senha, ignore este e-mail.");
+        try {
+            mailSender.send(message);
+        } catch (MailException exception) {
+            throw new EmailDeliveryException();
+        }
+    }
 }

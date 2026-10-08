@@ -151,6 +151,39 @@ class LoginUserTest {
     }
 
     @Test
+    void findsLocalAccountWithCaseInsensitiveEmailInput() {
+        User user = createUser();
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("correct-password", user.getPasswordHash())).thenReturn(true);
+        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(refreshTokenGenerator.generate()).thenReturn("refresh");
+        when(refreshTokenHasher.hash("refresh")).thenReturn("hash");
+
+        LoginResult result = loginUser.execute("USER@Test.COM", "correct-password");
+
+        assertThat(result.user()).isSameAs(user);
+        verify(userRepository).findByEmail("user@test.com");
+    }
+
+    @Test
+    void canLoginWithNewPasswordAfterSuccessfulResetVerifiedEmail() {
+        User resetUser = new User(UUID.randomUUID(), "user@test.com", "test-user", "new-password-hash",
+                OffsetDateTime.now(), OffsetDateTime.now(), true);
+        when(userRepository.findByEmail(resetUser.getEmail())).thenReturn(Optional.of(resetUser));
+        when(passwordEncoder.matches("new-password", "new-password-hash")).thenReturn(true);
+        when(accessTokenGenerator.generate(resetUser.getId())).thenReturn("access-after-reset");
+        when(refreshTokenGenerator.generate()).thenReturn("refresh-after-reset");
+        when(refreshTokenHasher.hash("refresh-after-reset")).thenReturn("refresh-hash-after-reset");
+
+        LoginResult result = loginUser.execute(resetUser.getEmail(), "new-password");
+
+        assertThat(result.user().isEmailVerified()).isTrue();
+        assertThat(result.accessToken()).isEqualTo("access-after-reset");
+        assertThat(result.refreshToken()).isEqualTo("refresh-after-reset");
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
     void shouldNotIssueRefreshTokenForIncorrectPassword() {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));

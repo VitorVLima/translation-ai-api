@@ -8,6 +8,7 @@ import com.example.com.englishai.backend.application.authentication.exception.Em
 import com.example.com.englishai.backend.application.authentication.exception.InvalidPasswordResetCodeException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidExternalIdentityException;
 import com.example.com.englishai.backend.application.authentication.exception.AuthenticationMethodConflictException;
+import com.example.com.englishai.backend.application.authentication.exception.EmailDeliveryException;
 import com.example.com.englishai.backend.application.llm.LlmProviderException;
 import com.example.com.englishai.backend.application.translation.InvalidTranslationRequestException;
 import com.example.com.englishai.backend.application.translation.InvalidCorrectionRequestException;
@@ -35,8 +36,20 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ResponseEntity<ErrorResponse> handleEmailDeliveryFailure(EmailDeliveryException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new ErrorResponse("Email service temporarily unavailable"));
+    }
+
     @ExceptionHandler(com.example.com.englishai.backend.application.conversation.ConversationLimitReachedException.class)
     public ResponseEntity<ErrorResponse> handleConversationLimit(com.example.com.englishai.backend.application.conversation.ConversationLimitReachedException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(exception.getMessage()));
+    }
+
+    @ExceptionHandler(com.example.com.englishai.backend.application.reading.ReadingActivityInProgressException.class)
+    public ResponseEntity<ErrorResponse> handleReadingActivityInProgress(com.example.com.englishai.backend.application.reading.ReadingActivityInProgressException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(exception.getMessage()));
     }
 

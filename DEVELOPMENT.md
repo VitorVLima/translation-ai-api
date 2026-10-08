@@ -19,6 +19,18 @@ cd Backend
 
 Flyway manages schema changes and Hibernate remains on ddl-auto=validate.
 
+## Backend health and runtime avatars
+
+The Backend exposes unauthenticated, status-only `GET /livez` and `GET /readyz` (also `/actuator/health/liveness` and `/actuator/health/readiness`). Liveness reflects the Spring process state; readiness also checks PostgreSQL. LLM, Whisper, Piper and SMTP are not contacted by probes. Other Actuator HTTP endpoints are unavailable, and JMX exposure is disabled. Existing AI timing/status logs remain the diagnostic source for provider failures.
+
+Development stores administrative runtime avatar images under `./data/profile-images` relative to the Backend process working directory. Production with `SPRING_PROFILES_ACTIVE=prod` or `production` requires `AVATAR_IMAGE_STORAGE_DIR` to be an existing, writable **absolute** directory. When the Backend runs in a container, mount a persistent volume or bind mount at this path. The current `Backend/compose.yaml` starts only PostgreSQL, so it cannot mount files into an application container; configure the Backend's own deployment separately. Back up and restore the avatar directory together with PostgreSQL, since the database stores asset keys while the image bytes live in the directory. Before changing the configured path, copy existing runtime files from the old directory. Multiple Backend instances need the same shared storage or object storage; separate local directories will diverge.
+
+## Email por ambiente
+
+O desenvolvimento local e os testes automatizados podem usar `MAIL_PROVIDER=noop`; nesse modo nenhum email real é enviado. Para validar entrega, configure `MAIL_PROVIDER=smtp` com host, remetente e credenciais fornecidos fora do repositório. O profile Spring `prod` (ou `production`) exige SMTP autenticado com STARTTLS e falha na inicialização se o provider for `noop` ou faltar configuração. Ative o profile explicitamente no deploy com `SPRING_PROFILES_ACTIVE=prod` e injete `MAIL_PASSWORD` pelo gerenciador de segredos.
+
+Os timeouts SMTP são `MAIL_SMTP_CONNECTION_TIMEOUT_MS=5000`, `MAIL_SMTP_WRITE_TIMEOUT_MS=5000` e `MAIL_SMTP_READ_TIMEOUT_MS=10000` por padrão. Os valores e as demais variáveis estão em `Backend/.env.example`. Um teste de entrega real para uma caixa controlada ainda é necessário no ambiente final; a suíte automatizada usa mocks.
+
 ## Whisper and Piper
 
 ```bat

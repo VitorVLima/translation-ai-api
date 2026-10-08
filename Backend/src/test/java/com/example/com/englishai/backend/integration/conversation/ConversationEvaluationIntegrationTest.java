@@ -33,7 +33,7 @@ class ConversationEvaluationIntegrationTest {
     ConversationEvaluationService service;
     @BeforeEach void setup() {
         tx=new TransactionTemplate(manager);
-        service=new ConversationEvaluationService(conversations,messages,evaluations,provider,Clock.fixed(now.toInstant(),ZoneOffset.UTC));
+        service=new ConversationEvaluationService(conversations,messages,evaluations,provider,Clock.fixed(now.toInstant(),ZoneOffset.UTC),manager);
         when(provider.complete(any())).thenReturn(new LlmResponse("{\"communication\":80,\"grammar\":70,\"vocabulary\":75,\"fluency\":79,\"relevance\":80,\"strengths\":[\"Boa comunicação.\"],\"improvements\":[\"Varie os conectores.\"]}"));
     }
     @AfterEach void cleanup() {
@@ -55,7 +55,7 @@ class ConversationEvaluationIntegrationTest {
         }
         return c;
     }
-    ConversationEvaluationService.Evaluation complete(UUID owner, UUID id) {return tx.execute(s -> service.complete(owner,id));}
+    ConversationEvaluationService.Evaluation complete(UUID owner, UUID id) {return service.complete(owner,id);}
 
     @Test void twoUsersReloadOwnershipHistoryAndEndedConversationAreIndependent() {
         var a=user();var b=user();var ca=conversation(a,5);var cb=conversation(b,5);
@@ -87,6 +87,29 @@ class ConversationEvaluationIntegrationTest {
         assertThatThrownBy(() -> tx.execute(s -> evaluations.saveAndFlush(new ConversationEvaluationEntity(UUID.randomUUID(),c,60,60,60,60,60,
                 ConversationEvaluationService.Result.SUCCESS,"[]","[]",now)))).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThat(service.get(owner,c.getId()).scores().overall()).isEqualTo(77);
+    }
+    @Test void slowProviderHoldsNoTransactionAndNewMessageInvalidatesStaleEvaluation() throws Exception {
+        var owner=user(); var c=conversation(owner,5);
+        var called=new CountDownLatch(1); var release=new CountDownLatch(1);
+        var inTransaction=new java.util.concurrent.atomic.AtomicBoolean(true);
+        when(provider.complete(any())).thenAnswer(invocation -> {
+            inTransaction.set(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            called.countDown();
+            if (!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("Provider test timed out");
+            return new LlmResponse("{\"communication\":80,\"grammar\":70,\"vocabulary\":75,\"fluency\":79,\"relevance\":80,\"strengths\":[],\"improvements\":[]}");
+        });
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            var evaluation=pool.submit(() -> complete(owner,c.getId()));
+            assertThat(called.await(5,TimeUnit.SECONDS)).isTrue();
+            assertThat(inTransaction.get()).isFalse();
+            var newTurn=pool.submit(() -> chat.addMessage(owner,c.getId(),"USER","One more thought",null));
+            assertThat(newTurn.get(3,TimeUnit.SECONDS).getContent()).isEqualTo("One more thought");
+            release.countDown();
+            assertThatThrownBy(() -> evaluation.get(5,TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class).hasCauseInstanceOf(IllegalStateException.class);
+        } finally { release.countDown(); }
+        assertThat(conversations.findById(c.getId()).orElseThrow().getEndedAt()).isNull();
+        assertThat(evaluations.findByConversationId(c.getId())).isEmpty();
     }
     @Test void invalidProviderRollsBackAndRetryWorks() {
         var owner=user();var c=conversation(owner,5);
@@ -120,8 +143,8 @@ class ConversationEvaluationIntegrationTest {
         var owner=user();var c=conversation(owner,5);
         var failing=mock(ConversationJpaRepository.class,org.mockito.AdditionalAnswers.delegatesTo(conversations));
         doThrow(new IllegalStateException("Write failed")).when(failing).saveAndFlush(any());
-        var isolated=new ConversationEvaluationService(failing,messages,evaluations,provider);
-        assertThatThrownBy(() -> tx.execute(s -> isolated.complete(owner,c.getId()))).isInstanceOf(IllegalStateException.class);
+        var isolated=new ConversationEvaluationService(failing,messages,evaluations,provider,Clock.systemUTC(),manager);
+        assertThatThrownBy(() -> isolated.complete(owner,c.getId())).isInstanceOf(IllegalStateException.class);
         assertThat(evaluations.findByConversationId(c.getId())).isEmpty();
         assertThat(conversations.findById(c.getId()).orElseThrow().getEndedAt()).isNull();
         assertThat(complete(owner,c.getId()).status()).isEqualTo(ConversationEvaluationService.Result.SUCCESS);

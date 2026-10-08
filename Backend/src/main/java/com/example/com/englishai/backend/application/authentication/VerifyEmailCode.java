@@ -6,6 +6,8 @@ import com.example.com.englishai.backend.application.ports.EmailVerificationCode
 import com.example.com.englishai.backend.application.ports.UserRepository;
 import com.example.com.englishai.backend.domain.authentication.EmailVerificationCode;
 import com.example.com.englishai.backend.domain.user.User;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
+import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,9 +36,14 @@ public class VerifyEmailCode {
 
     @Transactional
     public void execute(String email, String rawCode) {
-        String normalizedEmail = email.trim();
-        User user = users.findByEmailForUpdate(normalizedEmail)
-                .orElseThrow(InvalidEmailVerificationCodeException::new);
+        String normalizedEmail = EmailAddress.normalize(email);
+        User user;
+        try {
+            user = users.findByEmailForUpdate(normalizedEmail)
+                    .orElseThrow(InvalidEmailVerificationCodeException::new);
+        } catch (AmbiguousEmailAddressException exception) {
+            throw new InvalidEmailVerificationCodeException();
+        }
         if (user.isEmailVerified()) return;
 
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);

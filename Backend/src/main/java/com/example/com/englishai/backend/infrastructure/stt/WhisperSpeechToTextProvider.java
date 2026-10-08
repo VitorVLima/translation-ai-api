@@ -8,7 +8,6 @@ import com.example.com.englishai.backend.application.stt.SpeechToTextRequest;
 import com.example.com.englishai.backend.application.stt.SpeechToTextResult;
 import com.example.com.englishai.backend.application.translation.Language;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,15 +39,14 @@ public class WhisperSpeechToTextProvider implements SpeechToTextProvider {
     private SpeechToTextResult transcribeMeasured(SpeechToTextRequest request) {
         String boundary = "----EnglishAi" + UUID.randomUUID();
         try {
-            byte[] body = multipart(request, boundary);
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
                     .version(HttpClient.Version.HTTP_1_1)
                     .timeout(responseTimeout)
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
+                    .POST(multipart(request, boundary)).build();
             HttpResponse<String> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                if (response.statusCode() == 422) LOGGER.log(System.Logger.Level.WARNING, "WHISPER_UPSTREAM_VALIDATION_REJECTED status=422");
+                LOGGER.log(System.Logger.Level.WARNING, "WHISPER_UPSTREAM_FAILURE status={0}", response.statusCode());
                 throw new SpeechToTextProviderException("Whisper service request failed");
             }
             String text = stringField(response.body(), "text");
@@ -62,19 +60,19 @@ public class WhisperSpeechToTextProvider implements SpeechToTextProvider {
         } catch (IOException | RuntimeException e) { throw new SpeechToTextProviderException("Whisper service request failed", e); }
     }
 
-    private byte[] multipart(SpeechToTextRequest request, String boundary) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+    private HttpRequest.BodyPublisher multipart(SpeechToTextRequest request, String boundary) {
         String filename = request.filename() == null || request.filename().isBlank() ? "audio" : request.filename().replaceAll(".*[\\\\/]", "").replaceAll("[\"\r\n]", "_");
         String contentType = request.contentType() == null || request.contentType().isBlank() ? "application/octet-stream" : request.contentType();
-        write(out, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\nContent-Type: " + contentType + "\r\n\r\n");
-        out.write(request.audio()); write(out, "\r\n");
+        String header = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\nContent-Type: " + contentType + "\r\n\r\n";
+        String language = "\r\n";
         if (request.language() != null) {
-            write(out, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n" + request.language().code() + "\r\n");
+            language += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n" + request.language().code() + "\r\n";
         }
-        write(out, "--" + boundary + "--\r\n");
-        return out.toByteArray();
+        return HttpRequest.BodyPublishers.concat(
+                HttpRequest.BodyPublishers.ofString(header, StandardCharsets.UTF_8),
+                HttpRequest.BodyPublishers.ofByteArray(request.audio()),
+                HttpRequest.BodyPublishers.ofString(language + "--" + boundary + "--\r\n", StandardCharsets.UTF_8));
     }
-    private static void write(ByteArrayOutputStream out, String value) throws IOException { out.write(value.getBytes(StandardCharsets.UTF_8)); }
 
     private static String stringField(String json, String field) {
         if (json == null || json.isBlank()) throw new SpeechToTextProviderException("Whisper service response was invalid");

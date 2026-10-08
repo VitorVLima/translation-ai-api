@@ -9,6 +9,35 @@ import java.time.Duration;
 
 @Configuration
 public class RateLimitConfig {
+    @Bean public AiWorkloadLimiter aiWorkloadLimiter(
+            @Value("${AI_RATE_CACHE_MAX_SIZE:10000}") long cacheMax,
+            @Value("${AI_LLM_PER_HOUR:30}") int llmHour,
+            @Value("${AI_LLM_PER_OPERATION_MINUTE:6}") int llmMinute,
+            @Value("${AI_AUDIO_PER_OPERATION_MINUTE:12}") int audioMinute,
+            @Value("${AI_AUDIO_PER_HOUR:120}") int audioHour,
+            @Value("${AI_LLM_PER_USER_CONCURRENT:2}") int userLlm,
+            @Value("${AI_LLM_GLOBAL_CONCURRENT:8}") int globalLlm,
+            @Value("${AI_STT_GLOBAL_CONCURRENT:2}") int globalStt,
+            @Value("${AI_TTS_GLOBAL_CONCURRENT:2}") int globalTts,
+            @Value("${AI_SSE_GLOBAL_CONCURRENT:6}") int globalStreams) {
+        return new AiWorkloadLimiter(new LocalBucketRateLimitService(cacheMax, Duration.ofHours(2)),
+                llmHour, llmMinute, audioMinute, audioHour, userLlm, globalLlm,
+                globalStt, globalTts, globalStreams);
+    }
+    @Bean public AiWorkloadFilter aiWorkloadFilter(AiWorkloadLimiter limiter) {
+        return new AiWorkloadFilter(limiter);
+    }
+    @Bean public org.springframework.boot.web.servlet.FilterRegistrationBean<AiWorkloadFilter> aiWorkloadFilterRegistration(
+            AiWorkloadFilter filter) {
+        var registration = new org.springframework.boot.web.servlet.FilterRegistrationBean<>(filter);
+        registration.setEnabled(false); // Security chain runs this after JWT authentication.
+        return registration;
+    }
+    @Bean public SseStreamExecutor sseStreamExecutor(
+            @Value("${AI_SSE_THREADS:4}") int threads,
+            @Value("${AI_SSE_QUEUE_SIZE:2}") int queueSize) {
+        return new SseStreamExecutor(threads, queueSize);
+    }
     @Bean public ClientIpResolver clientIpResolver() { return new ClientIpResolver(); }
     @Bean public RateLimitService rateLimitService(
             @Value("${SECURITY_RATE_LIMIT_CACHE_MAX_SIZE:10000}") long max,

@@ -48,6 +48,7 @@ public class SecurityConfig {
             AuthenticationTokenValidator tokenValidator,
             @Value("${security.jwt.diagnostics-enabled:false}") boolean jwtDiagnosticsEnabled,
             ObjectProvider<AuthenticationRateLimitFilter> rateLimitFilter,
+            ObjectProvider<AiWorkloadFilter> aiWorkloadFilter,
             ObjectProvider<UserJpaRepository> users
     ) throws Exception {
 
@@ -69,6 +70,10 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/livez", "/readyz",
+                                "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
+                        .requestMatchers("/actuator/**").denyAll()
                         // Catalog images are non-sensitive bytes loaded by <img>; browsers cannot
                         // attach the Bearer token from sessionStorage to that request.
                         .requestMatchers(HttpMethod.GET, "/api/v1/avatars/*/image").permitAll()
@@ -83,6 +88,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/resend-verification",
                                 "/api/v1/auth/forgot-password",
                                 "/api/v1/auth/reset-password",
+                                "/api/v1/auth/validate-reset-code",
                                 "/api/v1/auth/google",
                                 "/api/v1/auth/google/nonce"
                         ).permitAll()
@@ -92,6 +98,7 @@ public class SecurityConfig {
 
         users.ifAvailable(repo -> http.addFilterAfter(new AdminAuthorizationFilter(repo), JwtAuthenticationFilter.class));
         rateLimitFilter.ifAvailable(filter -> http.addFilterBefore(filter, JwtAuthenticationFilter.class));
+        aiWorkloadFilter.ifAvailable(filter -> http.addFilterAfter(filter, JwtAuthenticationFilter.class));
         return http.build();
     }
 }

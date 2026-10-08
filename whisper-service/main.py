@@ -73,7 +73,7 @@ def transcribe_path(path: str, language: str | None = None, transcriber: Transcr
     return {"text": text, "language": language}
 
 
-async def save_upload(file: UploadFile) -> str:
+async def save_upload(file: UploadFile) -> tuple[str, int, str, str | None]:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=415, detail="Unsupported audio format")
@@ -90,7 +90,7 @@ async def save_upload(file: UploadFile) -> str:
                 temporary.write(chunk)
         if total == 0:
             raise HTTPException(status_code=400, detail="Audio file is empty")
-        return temporary.name
+        return temporary.name, total, suffix, file.content_type
     except Exception:
         try:
             os.unlink(temporary.name)
@@ -124,13 +124,21 @@ async def transcribe(file: UploadFile, language: str = Form(default=_MISSING_LAN
         language = None
     elif language not in {"pt", "en"}:
         raise HTTPException(status_code=400, detail="Invalid language")
-    path = await save_upload(file)
+    path, size_bytes, extension, content_type = await save_upload(file)
     try:
         return transcribe_path(path, language=language)
     except HTTPException:
         raise
-    except Exception:
-        logger.error("TRANSCRIPTION_FAILED")
+    except Exception as error:
+        # This keeps the diagnostic limited to audio metadata and the decoder's
+        # technical error. It never records bytes or a transcript.
+        logger.error(
+            "TRANSCRIPTION_FAILED extension=%s content_type=%s size_bytes=%d error=%s",
+            extension,
+            content_type or "unknown",
+            size_bytes,
+            str(error)[:300],
+        )
         raise HTTPException(status_code=500, detail="Unable to transcribe audio")
     finally:
         try:

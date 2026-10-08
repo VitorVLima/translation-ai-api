@@ -12,4 +12,9 @@ public class NoOpEmailSender implements EmailSender {
     public void sendEmailVerificationCode(String recipientEmail, String code) {
         // Intentionally empty: no email provider is configured in this stage.
     }
+
+    @Override
+    public void sendPasswordResetCode(String recipientEmail, String code) {
+        // Intentionally empty: no email provider is configured in this stage.
+    }
 }

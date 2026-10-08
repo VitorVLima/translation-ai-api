@@ -104,6 +104,30 @@ class VocabularyPersistenceIntegrationTest {
         assertThat(ReflectionTestUtils.getField(configuredService, "vocabularyWords")).isSameAs(vocabularyWords);
     }
 
+    @Test void slowGenerationDoesNotHoldUserLockOrTransaction() throws Exception {
+        UUID user = owner("slow");
+        var split = new VocabularyService(provider, profiles, lessons, vocabularyWords, vocabularyItems,
+                users, new VocabularyReviewScheduler(Clock.systemUTC()), transactionManager);
+        var called = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var inTransaction = new java.util.concurrent.atomic.AtomicBoolean(true);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            inTransaction.set(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            called.countDown();
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Provider test timed out");
+            return new LlmResponse(generatedWords(10));
+        }).when(provider).complete(any());
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var generation = pool.submit(() -> split.today(user));
+            assertThat(called.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(inTransaction.get()).isFalse();
+            var otherWrite = pool.submit(() -> transactions.execute(status -> users.findByIdForUpdate(user).orElseThrow().getId()));
+            assertThat(otherWrite.get(3, TimeUnit.SECONDS)).isEqualTo(user);
+            release.countDown();
+            assertThat(generation.get(5, TimeUnit.SECONDS).words()).hasSize(10);
+        } finally { release.countDown(); }
+    }
+
     @Test
     void firstAccessForDifferentUsersCreatesIndependentLessonsAndValidForeignKeys() {
         UUID userA = owner("a");
@@ -130,7 +154,7 @@ class VocabularyPersistenceIntegrationTest {
         UUID userA = owner("completed-a");
         UUID userB = owner("fresh-b");
         var lessonA = tx(() -> service.today(userA));
-        var answers = lessonA.words().stream().limit(5)
+        var answers = lessonA.words().stream().limit(3)
                 .map(word -> new VocabularyService.QuizAnswer(word.id(), word.id())).toList();
 
         tx(() -> service.submitQuiz(userA, lessonA.id(), answers));
@@ -147,7 +171,7 @@ class VocabularyPersistenceIntegrationTest {
 
         var restoredA = tx(() -> service.today(userA));
         assertThat(restoredA.progress().quizCompleted()).isTrue();
-        assertThat(restoredA.progress().quizScore()).isEqualTo(5);
+        assertThat(restoredA.progress().quizScore()).isEqualTo(3);
         assertThat(restoredA.progress().writingCompleted()).isTrue();
         assertThat(restoredA.progress().completedAt()).isNotNull();
         assertThat(restoredA.words().get(5).correctCount()).isEqualTo(1);

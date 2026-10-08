@@ -5,6 +5,9 @@ public interface ConversationJpaRepository extends JpaRepository<ConversationEnt
  long countByUserIdAndEndedAtIsNull(UUID userId);
  @org.springframework.data.jpa.repository.Query("select c from ConversationEntity c where c.userId=:userId order by case when c.endedAt is null then 0 else 1 end, case when c.endedAt is null then c.updatedAt else null end desc, c.endedAt desc, c.id asc")
  List<ConversationEntity> findByUserIdOrderedForHistory(@org.springframework.data.repository.query.Param("userId") UUID userId);
+ @org.springframework.data.jpa.repository.Query("select c from ConversationEntity c where c.userId=:userId order by case when c.endedAt is null then 0 else 1 end, case when c.endedAt is null then c.updatedAt else null end desc, c.endedAt desc, c.id asc")
+ List<ConversationEntity> findPageByUserIdOrderedForHistory(@org.springframework.data.repository.query.Param("userId") UUID userId,
+                                                            org.springframework.data.domain.Pageable page);
  Optional<ConversationEntity> findByIdAndUserId(UUID id,UUID userId);
  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
  @org.springframework.data.jpa.repository.Query("select c from ConversationEntity c where c.id=:id and c.userId=:userId")

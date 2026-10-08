@@ -1,5 +1,5 @@
 import type { LoginResponse, UserResponse } from './auth.types';
-import { CurrentUserError, getCurrentUser, RefreshError, refreshSession } from './auth.service';
+import { CurrentUserError, getCurrentUser, logout, RefreshError, refreshSession } from './auth.service';
 import { getRefreshToken, removeRefreshToken, saveRefreshToken } from './refresh-token.storage';
 
 export type AuthenticatedSession = {
@@ -13,6 +13,12 @@ let restorationPromise: Promise<RestorationResult> | null = null;
 let refreshPromise: Promise<string> | null = null;
 let cleanupPromise: Promise<void> | null = null;
 const invalidationListeners = new Set<() => void>();
+
+function traceAuth(event: string, details: Record<string, string | number | boolean>): void {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.info(`[AUTH] ${event}`, details);
+  }
+}
 
 export type SessionErrorKind = 'invalid' | 'network' | 'rateLimit' | 'unavailable' | 'storage' | 'changed';
 
@@ -45,9 +51,10 @@ async function removeRefreshTokenIfPossible(): Promise<void> {
   }
 }
 
-export async function invalidateSession(expectedSession: AuthenticatedSession | null): Promise<void> {
+export async function invalidateSession(expectedSession: AuthenticatedSession | null, reason = 'unspecified'): Promise<void> {
   // Uma resposta atrasada não pode encerrar uma sessão criada por outro login.
   if (currentSession !== expectedSession) return;
+  if (expectedSession) traceAuth('session-invalidated', { reason });
   currentSession = null;
   const cleanup = removeRefreshTokenIfPossible();
   cleanupPromise = cleanup;
@@ -55,6 +62,17 @@ export async function invalidateSession(expectedSession: AuthenticatedSession | 
   if (cleanupPromise === cleanup) cleanupPromise = null;
   if (expectedSession && currentSession === null) {
     invalidationListeners.forEach((listener) => listener());
+  }
+}
+
+export async function logoutSession(): Promise<void> {
+  const owner = currentSession;
+  let refreshToken: string | null = null;
+  try {
+    refreshToken = await getRefreshToken();
+    if (refreshToken?.trim()) await logout(refreshToken);
+  } finally {
+    await invalidateSession(owner, 'logout');
   }
 }
 
@@ -84,7 +102,7 @@ async function rotateTokensOnce(): Promise<string> {
   }
 
   if (!storedToken?.trim()) {
-    await invalidateSession(owner);
+    await invalidateSession(owner, 'missing-refresh-token');
     throw new SessionError('invalid');
   }
 
@@ -93,12 +111,12 @@ async function rotateTokensOnce(): Promise<string> {
     tokens = await refreshSession({ refreshToken: storedToken });
   } catch (error) {
     if (error instanceof RefreshError && error.kind === 'invalid') {
-      await invalidateSession(owner);
+      await invalidateSession(owner, 'refresh-401');
       throw new SessionError('invalid');
     }
     if (error instanceof RefreshError && error.kind === 'invalidResponse') {
       // Um 200 pode já ter rotacionado o token antigo, mesmo sem resposta utilizável.
-      await invalidateSession(owner);
+      await invalidateSession(owner, 'refresh-invalid-response');
     }
     if (error instanceof RefreshError && (error.kind === 'network' || error.kind === 'rateLimit')) {
       throw new SessionError(error.kind);
@@ -111,7 +129,7 @@ async function rotateTokensOnce(): Promise<string> {
     await saveRefreshToken(tokens.refreshToken);
   } catch {
     // O Backend já rotacionou: não reutilizar o token antigo.
-    await invalidateSession(owner);
+    await invalidateSession(owner, 'refresh-token-save-failed');
     throw new SessionError('storage');
   }
   if (currentSession !== owner) {

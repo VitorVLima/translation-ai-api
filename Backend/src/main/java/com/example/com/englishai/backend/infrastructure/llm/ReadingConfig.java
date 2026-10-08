@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Configuration;
 public class ReadingConfig {
     @Bean
     public ReadingService readingService(LlmProvider provider, ReadingActivityJpaRepository activities,
-                                        ReadingQuestionJpaRepository questions) {
-        return new ReadingService(provider, activities, questions, Clock.systemUTC());
+                                        ReadingQuestionJpaRepository questions,
+                                        org.springframework.transaction.PlatformTransactionManager manager) {
+        return new ReadingService(provider, activities, questions, Clock.systemUTC(), manager);
     }
 }

@@ -301,6 +301,26 @@ class AuthControllerLoginTest {
     }
 
     @Test
+    void shouldValidateResetCodeAnonymouslyWithoutResettingPassword() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/validate-reset-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"482731\"}"))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string("Cache-Control", "no-store"));
+        verify(resetPassword).validateCode("user@test.com", "482731");
+        verify(resetPassword, never()).execute(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldRejectMalformedResetCodeBeforeValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/validate-reset-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\",\"code\":\"42\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(resetPassword);
+    }
+
+    @Test
     void shouldRejectInvalidPasswordResetCodeFormat() throws Exception {
         mockMvc.perform(post("/api/v1/auth/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -335,13 +355,13 @@ class AuthControllerLoginTest {
 
     @Test
     void shouldReturnConflictWhenRegistrationPersistenceDetectsDuplicate() throws Exception {
-        when(registerUser.execute("user@test.com", "test-user", "password123"))
+        when(registerUser.execute("user@test.com", "password123"))
                 .thenThrow(new UserAlreadyExistsException());
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"user@test.com","username":"test-user","password":"password123"}
+                                {"email":"user@test.com","password":"password123"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(content().json("""

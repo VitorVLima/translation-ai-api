@@ -8,6 +8,8 @@ O Whisper está integrado ao Backend como o provider de STT. `WhisperSpeechToTex
 
 O serviço é opcional para funcionalidades exclusivamente textuais. Quando ele não estiver em execução ou estiver indisponível, somente as operações que exigem transcrição falham; conversa textual, leitura, vocabulário, tradução e correção não dependem dele.
 
+Em produção, `/transcribe` não tem autenticação própria. Mantenha o serviço acessível somente ao Backend por loopback ou rede privada; não publique a porta 8001 na Internet nem a encaminhe por um proxy público. Se Backend e Whisper estiverem em hosts distintos, restrinja a porta ao endereço/rede do Backend e valide o acesso a partir de uma rede externa.
+
 Padrao: modelo `small`, CPU e `int8`. O modelo `small` tende a reconhecer melhor gravacoes curtas e com ruido, mas consome mais memoria e pode ser mais lento que `base`. Para voltar ao modelo `base`, defina `WHISPER_MODEL=base`. Os valores podem ser alterados por `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_COMPUTE_TYPE`. O limite padrao e 20 MB (`WHISPER_MAX_FILE_SIZE_MB`).
 
 ## Configuração local e execução no Windows

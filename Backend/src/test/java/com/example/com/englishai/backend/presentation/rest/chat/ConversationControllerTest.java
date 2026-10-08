@@ -25,6 +25,7 @@ class ConversationControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean ChatWithTutor chat;
     @MockitoBean AuthenticationTokenValidator tokenValidator;
+    @MockitoBean com.example.com.englishai.backend.infrastructure.security.SseStreamExecutor streams;
 
     @Test void unauthenticatedRequestIsRejected() throws Exception {
         mockMvc.perform(post("/api/v1/chat").contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"Hi\",\"language\":\"en\"}"))

@@ -9,12 +9,38 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import com.example.com.englishai.backend.presentation.rest.PageWindow;
 
 @RestController
 @RequestMapping("/api/v1/reading")
 public class ReadingController {
     private final ReadingService service;
     public ReadingController(ReadingService service) { this.service = service; }
+
+    @GetMapping
+    public ResponseEntity<List<ReadingService.ActivitySummary>> list(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId,
+            @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
+        var window = PageWindow.optional(page, size, 25);
+        return ResponseEntity.ok().header("Cache-Control", "no-store")
+                .body(window.isPaged() ? service.listForUser(userId, window) : service.listForUser(userId));
+    }
+
+    @GetMapping("/{activityId}")
+    public ResponseEntity<ReadingService.ActivityDetail> detail(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId,
+            @PathVariable java.util.UUID activityId) {
+        return ResponseEntity.ok().header("Cache-Control", "no-store").body(service.detailForUser(userId, activityId));
+    }
+
+    @DeleteMapping("/{activityId}")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void delete(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId,
+            @PathVariable java.util.UUID activityId) {
+        service.deleteInProgressForUser(userId, activityId);
+    }
 
     @PostMapping("/generate")
     public ResponseEntity<ReadingService.Reading> generate(@org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId, @Valid @RequestBody GenerateRequest request) {
@@ -26,6 +52,14 @@ public class ReadingController {
     public ResponseEntity<ReadingService.Hints> hint(@Valid @RequestBody HintRequest request) {
         return ResponseEntity.ok().header("Cache-Control", "no-store")
                 .body(service.hint(request.text(), request.difficulty()));
+    }
+
+    @GetMapping("/{activityId}/hints")
+    public ResponseEntity<ReadingService.Hints> hintsForActivity(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId,
+            @PathVariable java.util.UUID activityId) {
+        return ResponseEntity.ok().header("Cache-Control", "no-store")
+                .body(service.hintsForActivity(userId, activityId));
     }
 
     @PostMapping("/questions")

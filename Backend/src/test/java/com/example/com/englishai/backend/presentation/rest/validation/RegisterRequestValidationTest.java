@@ -55,7 +55,7 @@ class RegisterRequestValidationTest {
     }
 
     private Set<String> passwordViolations(String password) {
-        RegisterRequest request = new RegisterRequest("user@test.com", "test-user", password);
+        RegisterRequest request = new RegisterRequest("user@test.com", password);
         return validator.validateProperty(request, "password").stream()
                 .map(violation -> violation.getMessage())
                 .collect(Collectors.toSet());

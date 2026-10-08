@@ -62,7 +62,17 @@ public class ConversationService {
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ConversationEntity create(UUID userId, String scenarioKey, String language, String difficulty, String interactionMode) {
+        return create(userId, scenarioKey, language, ConversationDifficulty.from(difficulty), ConversationInteractionMode.from(interactionMode));
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ConversationEntity create(UUID userId, String scenarioKey, String language, ConversationDifficulty difficulty) {
+        return create(userId, scenarioKey, language, difficulty, ConversationInteractionMode.TEXT);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ConversationEntity create(UUID userId, String scenarioKey, String language, ConversationDifficulty difficulty, ConversationInteractionMode interactionMode) {
         var parsedDifficulty = difficulty == null ? ConversationDifficulty.INTERMEDIATE : difficulty;
         var definition = definition(scenarioKey);
         if (!definition.isEnabled()) throw new IllegalStateException("Scenario disabled");
@@ -77,7 +87,7 @@ public class ConversationService {
             if (!definition(scenarioKey).isEnabled()) throw new IllegalStateException("Scenario disabled");
             var now = OffsetDateTime.now(ZoneOffset.UTC);
             var conversation = conversations.save(new ConversationEntity(UUID.randomUUID(), userId, scenarioKey,
-                    parsedLanguage.code(), definition.getDisplayName(), now, parsedDifficulty));
+                    parsedLanguage.code(), definition.getDisplayName(), now, parsedDifficulty, interactionMode));
             messages.save(new ConversationMessageEntity(UUID.randomUUID(), conversation.getId(), "ASSISTANT",
                     opening.reply(), null, now));
             return conversation;
@@ -87,6 +97,11 @@ public class ConversationService {
     @Transactional(readOnly = true)
     public List<ConversationEntity> list(UUID userId) {
         return conversations.findByUserIdOrderedForHistory(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationEntity> list(UUID userId, org.springframework.data.domain.Pageable page) {
+        return conversations.findPageByUserIdOrderedForHistory(userId, page);
     }
 
     private void checkCapacity(UUID userId) {
@@ -103,6 +118,12 @@ public class ConversationService {
     public List<ConversationMessageEntity> history(UUID userId, UUID id) {
         require(userId, id);
         return messages.findByConversationIdOrderByCreatedAtAsc(id);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationMessageEntity> history(UUID userId, UUID id, org.springframework.data.domain.Pageable page) {
+        require(userId, id);
+        return messages.findByConversationIdOrderByCreatedAtAscIdAsc(id, page);
     }
 
     @Transactional

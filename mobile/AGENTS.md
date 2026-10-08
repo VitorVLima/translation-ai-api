@@ -25,7 +25,7 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
+- Use **Expo Router** for all navigation. Routes live in `app/` at the mobile project root; `_layout.tsx` files define navigators. Keep non-route code outside `app/`.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
@@ -137,8 +137,9 @@ Grow the structure only when needed.
 
 As features are introduced, the application may evolve toward:
 
+app/
+  route files and layouts
 src/
-  app/
   api/
   components/
   features/
@@ -147,7 +148,7 @@ src/
 
 Responsibilities:
 
-- `src/app/`: Expo Router routes and layouts only.
+- `app/`: Expo Router routes and layouts only.
 - `src/api/`: Backend HTTP communication and HTTP-specific concerns.
 - `src/components/`: genuinely reusable UI components.
 - `src/features/`: feature-specific code.
@@ -158,6 +159,31 @@ Do not create all directories in advance.
 
 Keep business and HTTP logic out of Expo Router route files when it becomes
 large enough to deserve separation.
+
+## Mobile architecture conventions
+
+- Keep files in `app/` focused on routes, layouts and navigation. Route files
+  should remain thin whenever possible and render a feature screen.
+- Put screen implementations in `src/features/<feature>/screens/`.
+- Put components used only by one feature in
+  `src/features/<feature>/components/`.
+- Put visual components shared by multiple features in `src/components/`.
+  Do not promote a component to this directory before real reuse exists.
+- Keep business rules, API calls and session logic out of route files.
+- Keep features decoupled whenever practical. A feature may add its own
+  screens, components, hooks, services and types only as those responsibilities
+  become necessary.
+- Future shared colors, spacing and typography may live in `src/theme/` after
+  multiple screens demonstrate real reuse. Do not create a design system in
+  anticipation of future screens.
+- Do not create empty directories, placeholder abstractions or shared
+  components solely to match a proposed folder tree.
+- The Backend remains the source of truth for API contracts and business
+  rules.
+- UI refactors must preserve the authentication guarantees: access tokens stay
+  only in memory, refresh tokens stay in SecureStore, token rotation and
+  single-flight refresh remain intact, and credentials or tokens are never
+  logged or exposed in the UI.
 
 ---
 

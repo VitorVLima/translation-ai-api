@@ -7,6 +7,7 @@ import com.example.com.englishai.backend.application.profile.EnglishLevel;
 import com.example.com.englishai.backend.application.profile.OnboardingStatus;
 import com.example.com.englishai.backend.application.profile.ProfileService;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserProfileEntity;
+import com.example.com.englishai.backend.infrastructure.persistence.entity.PredefinedAvatarEntity;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenGenerator;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenValidator;
 import com.example.com.englishai.backend.infrastructure.security.SecurityConfig;
@@ -29,11 +30,14 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -85,6 +89,46 @@ class ProfileControllerTest {
     }
 
     @Test
+    void initialSetupIsSavedForTheAuthenticatedPrincipalAndReturnsCompletion() throws Exception {
+        UUID owner = UUID.randomUUID();
+        var updated = profile(owner, OnboardingStatus.PENDING);
+        var avatar = mock(PredefinedAvatarEntity.class);
+        when(avatar.getAvatarKey()).thenReturn("avatar_01");
+        when(catalog.publicAvatars()).thenReturn(List.of(avatar));
+        updated.updateInitialSetup(LocalDate.of(2000, 5, 10), EnglishLevel.B1,
+                com.example.com.englishai.backend.application.profile.LearningGoal.TRAVEL,
+                OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC));
+        when(service.updateInitialSetup(owner, "Ana Silva", LocalDate.of(2000, 5, 10), EnglishLevel.B1,
+                com.example.com.englishai.backend.application.profile.LearningGoal.TRAVEL, "avatar_01")).thenReturn(updated);
+
+        mockMvc.perform(put("/api/v1/users/me/profile/initial-setup").header("Authorization", "Bearer " + token(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Ana Silva\",\"birthDate\":\"2000-05-10\",\"englishLevel\":\"B1\",\"learningGoal\":\"TRAVEL\",\"avatarKey\":\"avatar_01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preferredLanguage").doesNotExist())
+                .andExpect(jsonPath("$.initialSetupCompleted").value(true));
+
+        verify(service).updateInitialSetup(owner, "Ana Silva", LocalDate.of(2000, 5, 10), EnglishLevel.B1,
+                com.example.com.englishai.backend.application.profile.LearningGoal.TRAVEL, "avatar_01");
+    }
+
+    @Test
+    void initialSetupRejectsMissingFieldsBeforeCallingService() throws Exception {
+        UUID owner = UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/users/me/profile/initial-setup").header("Authorization", "Bearer " + token(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"birthDate\":\"2000-05-10\",\"englishLevel\":\"A1\",\"learningGoal\":\"GENERAL\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(put("/api/v1/users/me/profile/initial-setup").header("Authorization", "Bearer " + token(owner))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"englishLevel\":\"A1\",\"learningGoal\":\"GENERAL\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(put("/api/v1/users/me/profile/initial-setup").header("Authorization", "Bearer " + token(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"birthDate\":\"2000-05-10\",\"englishLevel\":\"A1\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void dismissesOnlyTheAuthenticatedUsersOnboarding() throws Exception {
         UUID owner = UUID.randomUUID();
         when(service.dismissOnboarding(owner)).thenReturn(profile(owner, OnboardingStatus.DISMISSED));
@@ -95,6 +139,40 @@ class ProfileControllerTest {
                 .andExpect(jsonPath("$.onboardingStatus").value("DISMISSED"));
 
         verify(service).dismissOnboarding(owner);
+    }
+
+    @Test
+    void skippingInitialSetupMarksOnlyTheAuthenticatedProfileCompleteWithoutProfileValues() throws Exception {
+        UUID owner = UUID.randomUUID();
+        var skipped = new UserProfileEntity(owner, null, null, null, null, AvatarType.PREDEFINED, "avatar_default",
+                OnboardingStatus.PENDING, OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC));
+        skipped.markInitialSetupSkipped(OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC));
+        when(service.skipInitialSetup(owner)).thenReturn(skipped);
+
+        mockMvc.perform(post("/api/v1/users/me/profile/initial-setup/skip")
+                        .header("Authorization", "Bearer " + token(owner)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.initialSetupCompleted").value(true))
+                .andExpect(jsonPath("$.birthDate").value(org.hamcrest.Matchers.nullValue()));
+
+        verify(service).skipInitialSetup(owner);
+    }
+
+    @Test
+    void rejectsDefaultOrUnknownAvatarBeforeCompletingSetup() throws Exception {
+        UUID owner = UUID.randomUUID();
+        var defaultAvatar = mock(PredefinedAvatarEntity.class);
+        when(defaultAvatar.getAvatarKey()).thenReturn("avatar_default");
+        when(catalog.publicAvatars()).thenReturn(List.of(defaultAvatar));
+
+        mockMvc.perform(put("/api/v1/users/me/profile/initial-setup")
+                        .header("Authorization", "Bearer " + token(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Ana\",\"birthDate\":\"2000-05-10\",\"englishLevel\":\"B1\",\"learningGoal\":\"TRAVEL\",\"avatarKey\":\"avatar_default\"}"))
+                .andExpect(status().isBadRequest());
+
+        verify(service, never()).updateInitialSetup(eq(owner), eq("Ana"), eq(LocalDate.of(2000, 5, 10)),
+                eq(EnglishLevel.B1), eq(com.example.com.englishai.backend.application.profile.LearningGoal.TRAVEL), eq("avatar_default"));
     }
 
     private UserProfileEntity profile(UUID userId, OnboardingStatus status) {

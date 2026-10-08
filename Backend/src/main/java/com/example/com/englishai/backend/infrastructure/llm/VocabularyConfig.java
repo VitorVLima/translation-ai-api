@@ -22,8 +22,9 @@ public class VocabularyConfig {
                                                UserVocabularyWordJpaRepository vocabularyWords,
                                                VocabularyItemJpaRepository items,
                                                UserJpaRepository users,
-                                               VocabularyReviewScheduler scheduler) {
-        return new VocabularyService(provider, profiles, lessons, vocabularyWords, items, users, scheduler);
+                                               VocabularyReviewScheduler scheduler,
+                                               org.springframework.transaction.PlatformTransactionManager manager) {
+        return new VocabularyService(provider, profiles, lessons, vocabularyWords, items, users, scheduler, manager);
     }
 
     @Bean

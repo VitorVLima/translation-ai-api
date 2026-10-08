@@ -51,7 +51,8 @@ requests concorrentes ou posteriores não disparam uma sequência de refreshes.
 
 Se a remoção segura também falhar, a memória continua vazia; não é possível
 garantir a exclusão física enquanto o armazenamento do dispositivo estiver indisponível.
-`App.tsx` assina a notificação de invalidação e volta ao Login com mensagem segura.
+`auth-navigation.tsx` assina a notificação de invalidação; os guards do Expo
+Router voltam ao Login com uma mensagem segura.
 
 ## Ambiguidade de rede
 
@@ -79,23 +80,11 @@ fetch simulado e SecureStore simulado. Não acessam o Backend, credenciais reais
 ou armazenamento nativo. Cobrem concorrência, resposta atrasada, JWT idêntico,
 persistência antes do retry, falhas, startup e ausência de loops.
 
-No Android físico, o botão **Verificar sessão**, disponível apenas com `__DEV__`,
-envia duas chamadas simultâneas a `/users/me` e mostra somente feedback genérico.
-
-1. Fazer login e tocar no botão: esperar dois GET 200 e nenhum POST de refresh.
-2. Manter o app aberto até expirar o access token. O padrão documentado é 900 s;
-   verificar o TTL configurado localmente, sem ler ou imprimir o token.
-3. Tocar no botão: esperar dois GET 401, um POST refresh 200 e dois GET 200.
-   Cada GET original tem no máximo um retry. Não reabrir o app antes desse teste,
-   pois o startup renovaria o access token.
-4. Repetir após outra expiração: comprova o uso do refresh token rotacionado.
-5. Em conta/ambiente descartável com família previamente revogada ou expirada,
-   esperar a expiração do access token e tocar no botão: refresh 401 e Login.
-6. Desligar o Backend: o erro de rede não deve apagar a sessão. Para simular perda
-   especificamente durante o refresh, usar os testes automatizados ou falha de
-   rede controlada; não registrar bodies/headers para inspecionar tokens.
-7. Conferir 429, falha de persistência e segundo 401 com os testes simulados.
-   Não alterar configurações de segurança do Backend para forçar esses casos.
+A Home real não expõe um botão técnico para disparar requests protegidas. Enquanto
+nenhuma funcionalidade autenticada consumir essa infraestrutura, concorrência,
+rotação, falhas de persistência e segundo 401 devem ser verificados pelos testes
+automatizados. A validação manual volta a ser aplicável quando uma chamada
+protegida fizer parte de uma feature real.
 
 Contar apenas método, caminho e status no acesso HTTP do Backend (ou usar
 breakpoints nos controllers). Não habilitar captura de Authorization, request

@@ -32,7 +32,7 @@ public class User {
     public User(UUID id, String email, String username, String passwordHash,
                 OffsetDateTime createdAt, OffsetDateTime updatedAt, boolean emailVerified, UserRole role) {
         this.id = id;
-        this.email = email;
+        this.email = EmailAddress.normalize(email);
         this.username = username;
         this.passwordHash = passwordHash;
         this.createdAt = createdAt;

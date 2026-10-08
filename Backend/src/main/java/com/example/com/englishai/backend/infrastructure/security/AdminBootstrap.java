@@ -33,7 +33,7 @@ public class AdminBootstrap {
     private void bootstrapSuperAdmin() {
         String email = normalize(superAdminEmail);
         if (email.isBlank()) return;
-        UserEntity candidate = users.findByEmail(email).orElse(null);
+        UserEntity candidate = findSingleByNormalizedEmail(email);
         if (candidate == null) {
             log.warn("SUPER_ADMIN_BOOTSTRAP status=user_not_found");
             return;
@@ -54,15 +54,25 @@ public class AdminBootstrap {
     private void bootstrapAdmin() {
         String email = normalize(adminEmail);
         if (email.isBlank()) return;
-        users.findByEmail(email).ifPresent(user -> {
+        var user = findSingleByNormalizedEmail(email);
+        if (user != null) {
             if (user.getRole() != UserRole.SUPER_ADMIN && user.getRole() != UserRole.ADMIN) {
                 user.setRole(UserRole.ADMIN);
                 users.save(user);
             }
-        });
+        }
     }
 
     private static String normalize(String email) {
         return email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private UserEntity findSingleByNormalizedEmail(String email) {
+        var matches = users.findAllByNormalizedEmail(email);
+        if (matches.size() > 1) {
+            log.error("ADMIN_BOOTSTRAP status=ambiguous_email");
+            return null;
+        }
+        return matches.isEmpty() ? null : matches.getFirst();
     }
 }

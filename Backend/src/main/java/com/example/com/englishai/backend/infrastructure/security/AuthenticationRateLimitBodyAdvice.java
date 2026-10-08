@@ -6,6 +6,7 @@ import com.example.com.englishai.backend.presentation.rest.auth.dto.LoginRequest
 import com.example.com.englishai.backend.presentation.rest.auth.dto.VerifyEmailRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResendEmailVerificationRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.dto.ResetPasswordRequest;
+import com.example.com.englishai.backend.presentation.rest.auth.dto.ValidatePasswordResetCodeRequest;
 import com.example.com.englishai.backend.presentation.rest.auth.AuthController;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpInputMessage;
@@ -55,12 +56,13 @@ public class AuthenticationRateLimitBodyAdvice extends RequestBodyAdviceAdapter 
     @Override
     public boolean supports(MethodParameter methodParameter, Type targetType,
                             Class<? extends HttpMessageConverter<?>> converterType) {
-        return (targetType == LoginRequest.class || targetType == VerifyEmailRequest.class || targetType == ResendEmailVerificationRequest.class || targetType == ResetPasswordRequest.class)
+        return (targetType == LoginRequest.class || targetType == VerifyEmailRequest.class || targetType == ResendEmailVerificationRequest.class || targetType == ResetPasswordRequest.class || targetType == ValidatePasswordResetCodeRequest.class)
                 && methodParameter.getMethod() != null
                 && (methodParameter.getMethod().getName().equals("login")
                     || methodParameter.getMethod().getName().equals("verifyEmail")
                     || methodParameter.getMethod().getName().equals("resendVerification")
-                    || methodParameter.getMethod().getName().equals("resetPassword"))
+                    || methodParameter.getMethod().getName().equals("resetPassword")
+                    || methodParameter.getMethod().getName().equals("validateResetCode"))
                 && AuthController.class.isAssignableFrom(methodParameter.getContainingClass())
                 && methodParameter.hasMethodAnnotation(PostMapping.class);
     }
@@ -68,7 +70,7 @@ public class AuthenticationRateLimitBodyAdvice extends RequestBodyAdviceAdapter 
     @Override
     public Object afterBodyRead(Object body, HttpInputMessage inputMessage, MethodParameter parameter,
                                 Type targetType, Class<? extends HttpMessageConverter<?>> converterType) {
-        String email = body instanceof LoginRequest login ? login.email() : body instanceof VerifyEmailRequest verify ? verify.email() : body instanceof ResendEmailVerificationRequest resend ? resend.email() : ((ResetPasswordRequest) body).email();
+        String email = body instanceof LoginRequest login ? login.email() : body instanceof VerifyEmailRequest verify ? verify.email() : body instanceof ResendEmailVerificationRequest resend ? resend.email() : body instanceof ResetPasswordRequest reset ? reset.email() : ((ValidatePasswordResetCodeRequest) body).email();
         int accountCapacity = body instanceof LoginRequest ? capacity : body instanceof VerifyEmailRequest ? verifyCapacity : body instanceof ResendEmailVerificationRequest ? resendCapacity : resetCapacity;
         Duration accountWindow = body instanceof LoginRequest ? window : body instanceof VerifyEmailRequest ? verifyWindow : resetWindow;
         var decision = service.tryConsume(keyGenerator.accountKey(email), accountCapacity, accountWindow);

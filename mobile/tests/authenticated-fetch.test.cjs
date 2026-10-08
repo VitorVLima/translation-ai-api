@@ -9,6 +9,23 @@ const user = { id: 'test-user', email: 'user@example.test', username: 'Test', cr
 const pair = { accessToken: 'test-access-next', refreshToken: 'test-refresh-next' };
 const json = (value) => new Response(JSON.stringify(value), { status: 200 });
 const status = (code) => new Response(null, { status: code });
+
+test('production network errors never log URLs, Authorization or native exception details', async () => {
+  const logs = [];
+  const h = harness(() => { throw new Error('Authorization: Bearer test-access-initial file:///private/audio.m4a'); }, { logs });
+  await h.login();
+  await assert.rejects(h.request('/api/v1/transcriptions', { method: 'POST' }), error => error.kind === 'network');
+  assert.deepEqual(logs, []);
+});
+
+test('development diagnostics keep controlled request context without native exception text', async () => {
+  const logs = [];
+  const h = harness(() => { throw new Error('Bearer secret file:///private/audio.m4a'); }, { development: true, logs });
+  await h.login();
+  await assert.rejects(h.request('/api/v1/transcriptions', { method: 'POST' }), error => error.kind === 'network');
+  assert.ok(logs.some(([event]) => event.includes('transcription-fetch-error')));
+  assert.doesNotMatch(JSON.stringify(logs), /Bearer secret|Authorization|file:\/\/\/private|https:\/\/api\.example/);
+});
 function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
@@ -17,7 +34,7 @@ function deferred() {
 
 // Executa os módulos reais em memória. Somente rede, configuração e SecureStore
 // são substituídos; usa node:test e o TypeScript que o projeto já possui.
-function harness(handleRequest) {
+function harness(handleRequest, { development = false, logs = [] } = {}) {
   const state = { token: 'test-refresh-initial', refreshes: 0, requests: 0, removals: 0, failSave: false };
   const secureStore = {
     getItemAsync: async () => state.token,
@@ -28,7 +45,9 @@ function harness(handleRequest) {
     },
     deleteItemAsync: async () => { state.removals++; state.token = null; },
   };
-  const context = vm.createContext({ URL, Headers, fetch: async (url, options) => {
+  const context = vm.createContext({ URL, Headers, __DEV__: development,
+    console: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) },
+    fetch: async (url, options) => {
     const isRefresh = new URL(url).pathname === '/api/v1/auth/refresh';
     if (isRefresh) state.refreshes++; else state.requests++;
     return handleRequest({ url, options, isRefresh, state });
@@ -44,6 +63,7 @@ function harness(handleRequest) {
     const execute = vm.runInContext(`(function(require, module, exports) {${output}\n})`, context, { filename: file });
     execute((name) => {
       if (name === 'expo-secure-store') return secureStore;
+      if (name === 'expo/fetch') return { fetch: context.fetch };
       if (name.endsWith('/config/api')) return { API_URL: 'https://api.example.test' };
       return load(path.resolve(path.dirname(file), `${name}.ts`));
     }, module, module.exports);

@@ -2,7 +2,7 @@ package com.example.com.englishai.backend.application.user.usecase;
 
 import com.example.com.englishai.backend.application.ports.UserRepository;
 import com.example.com.englishai.backend.application.user.exception.EmailAlreadyExistsException;
-import com.example.com.englishai.backend.application.user.exception.UsernameAlreadyExistsException;
+import com.example.com.englishai.backend.domain.user.EmailAddress;
 import com.example.com.englishai.backend.domain.user.User;
 import org.springframework.stereotype.Service;
 
@@ -18,22 +18,19 @@ public class CreateUser {
         this.userRepository = userRepository;
     }
 
-    public User execute(String email, String username, String passwordHash) {
+    public User execute(String email, String passwordHash) {
+        String normalizedEmail = EmailAddress.normalize(email);
 
-        if (userRepository.existsByEmail(email)) {
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw new EmailAlreadyExistsException();
-        }
-
-        if (userRepository.existsByUsername(username)) {
-            throw new UsernameAlreadyExistsException();
         }
 
         OffsetDateTime now = OffsetDateTime.now();
 
         User user = new User(
                 UUID.randomUUID(),
-                email,
-                username,
+                normalizedEmail,
+                null,
                 passwordHash,
                 now,
                 now,

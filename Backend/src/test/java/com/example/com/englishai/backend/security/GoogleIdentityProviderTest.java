@@ -20,6 +20,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,6 +38,14 @@ class GoogleIdentityProviderTest {
         var identity = provider.validate(token(signingKey, NOW, NOW.plusSeconds(300), "client-id", "nonce-1"), "nonce-1");
         assertThat(identity.subject()).isEqualTo("google-sub");
         assertThat(identity.email()).isEqualTo("person@example.com");
+    }
+
+    @Test
+    void acceptsTheSha256NonceDigestUsedByNativeGoogleSignIn() throws Exception {
+        var rawNonce = "server-nonce";
+        var digest = hex(MessageDigest.getInstance("SHA-256").digest(rawNonce.getBytes(StandardCharsets.UTF_8)));
+        var identity = provider.validate(token(signingKey, NOW, NOW.plusSeconds(300), "client-id", digest), rawNonce);
+        assertThat(identity.subject()).isEqualTo("google-sub");
     }
 
     @Test
@@ -127,5 +137,11 @@ class GoogleIdentityProviderTest {
         var jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims);
         jwt.sign(new RSASSASigner(key.toPrivateKey()));
         return jwt.serialize();
+    }
+
+    private static String hex(byte[] bytes) {
+        var result = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) result.append(String.format("%02x", value));
+        return result.toString();
     }
 }

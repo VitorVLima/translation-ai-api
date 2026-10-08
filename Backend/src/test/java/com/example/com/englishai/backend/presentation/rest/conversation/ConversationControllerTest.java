@@ -25,6 +25,7 @@ class ConversationControllerTest {
     @MockitoBean ConversationService service;
     @MockitoBean com.example.com.englishai.backend.application.conversation.ConversationEvaluationService evaluations;
     @MockitoBean AuthenticationTokenValidator tokens;
+    @MockitoBean com.example.com.englishai.backend.infrastructure.security.SseStreamExecutor streams;
     @MockitoBean com.example.com.englishai.backend.infrastructure.persistence.repository.ScenarioDefinitionJpaRepository definitions;
     @MockitoBean com.example.com.englishai.backend.application.catalog.AssistantIdentityResolver identities;
 
@@ -125,6 +126,67 @@ class ConversationControllerTest {
         mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\",\"difficulty\":\"EXPERT\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test void creationPersistsAndReturnsVoiceMode() throws Exception {
+        var owner = UUID.randomUUID();
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.create(owner, "JOB_INTERVIEW", "en", "BEGINNER", "VOICE"))
+                .thenReturn(new ConversationEntity(UUID.randomUUID(), owner, "JOB_INTERVIEW", "en", "Interview",
+                        OffsetDateTime.now(), com.example.com.englishai.backend.application.conversation.ConversationDifficulty.BEGINNER,
+                        com.example.com.englishai.backend.application.conversation.ConversationInteractionMode.VOICE));
+        mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\",\"difficulty\":\"BEGINNER\",\"interactionMode\":\"VOICE\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.interactionMode").value("VOICE"));
+        verify(service).create(owner, "JOB_INTERVIEW", "en", "BEGINNER", "VOICE");
+    }
+
+    @Test void listAndReopeningReturnPersistedVoiceMode() throws Exception {
+        var owner = UUID.randomUUID();
+        var id = UUID.randomUUID();
+        var conversation = new ConversationEntity(id, owner, "JOB_INTERVIEW", "en", "Interview",
+                OffsetDateTime.now(), com.example.com.englishai.backend.application.conversation.ConversationDifficulty.BEGINNER,
+                com.example.com.englishai.backend.application.conversation.ConversationInteractionMode.VOICE);
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.list(owner)).thenReturn(List.of(conversation));
+        when(service.require(owner, id)).thenReturn(conversation);
+        when(service.history(owner, id)).thenReturn(List.of());
+        mvc.perform(get("/api/v1/conversations").header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].interactionMode").value("VOICE"));
+        mvc.perform(get("/api/v1/conversations/" + id).header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.conversation.interactionMode").value("VOICE"));
+    }
+
+    @Test void optionalPagesKeepExistingArrayShapesAndRejectInvalidSizes() throws Exception {
+        var owner = UUID.randomUUID(); var id = UUID.randomUUID(); var now = OffsetDateTime.now();
+        var conversation = new ConversationEntity(id, owner, "JOB_INTERVIEW", "en", "Interview", now);
+        var message = new com.example.com.englishai.backend.infrastructure.persistence.entity.ConversationMessageEntity(
+                UUID.randomUUID(), id, "ASSISTANT", "Opening", null, now);
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(owner);
+        when(service.list(eq(owner), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(conversation));
+        when(service.require(owner, id)).thenReturn(conversation);
+        when(service.history(eq(owner), eq(id), any(org.springframework.data.domain.Pageable.class))).thenReturn(List.of(message));
+
+        mvc.perform(get("/api/v1/conversations?page=0&size=25").header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(id.toString()));
+        mvc.perform(get("/api/v1/conversations/" + id + "?messagesPage=0&messagesSize=50")
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.messages[0].content").value("Opening"));
+        mvc.perform(get("/api/v1/conversations?page=-1").header("Authorization", "Bearer test-token"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/conversations/" + id + "?messagesSize=10")
+                        .header("Authorization", "Bearer test-token"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void invalidInteractionModeIsRejected() throws Exception {
+        when(tokens.validateAndGetUserId("test-token")).thenReturn(UUID.randomUUID());
+        mvc.perform(post("/api/v1/conversations").header("Authorization", "Bearer test-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"scenario\":\"JOB_INTERVIEW\",\"language\":\"en\",\"interactionMode\":\"VIDEO\"}"))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(service);
     }

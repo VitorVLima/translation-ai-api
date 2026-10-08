@@ -15,8 +15,10 @@ function app({ unavailable = false } = {}) {
     return elements.get(id);
   };
   const calls = [];
+  const storage = new Map();
   const sandbox = { document: { getElementById: element, querySelectorAll: () => [], createElement: () => ({}), head: { appendChild() {} } },
-    window: { confirm: () => true }, sessionStorage: { getItem: () => null }, FormData,
+    window: { confirm: () => true }, sessionStorage: { getItem: key => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) }, FormData,
     fetch: async (url, options = {}) => {
       const request = { path: new URL(url).pathname, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : undefined };
       calls.push(request);
@@ -31,8 +33,34 @@ function app({ unavailable = false } = {}) {
   run(source);
   // Keep HTTP, form generation and submit logic real; replace only the modal DOM boundary.
   run('modal = (title, body, submit) => { globalThis.dialog = { title, body, submit }; return { querySelector: element }; }; avatarRows = [{ key: "avatar", displayName: "Assistant" }];');
-  return { run, calls, element, sandbox };
+  return { run, calls, element, sandbox, storage };
 }
+
+test("Admin escapes API values before inserting them in HTML", async () => {
+  const ui = app();
+  const payload = '" autofocus onfocus="alert(1)';
+  ui.run(`avatarForm(${JSON.stringify({ key: "avatar", displayName: payload, sortOrder: payload })})`);
+  assert.match(ui.sandbox.dialog.body, /value="&quot; autofocus onfocus=&quot;alert\(1\)"/);
+  assert.doesNotMatch(ui.sandbox.dialog.body, /value="" autofocus/);
+  await ui.run(`scenarioForm(${JSON.stringify({ ...scenario, sortOrder: payload, description: '<script>alert(1)</script>' })})`);
+  assert.match(ui.sandbox.dialog.body, /value="&quot; autofocus onfocus=&quot;alert\(1\)"/);
+  assert.match(ui.sandbox.dialog.body, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(ui.sandbox.dialog.body, /<script>alert\(1\)<\/script>/);
+  ui.run(`avatarRows = [{ id: "a", key: "avatar", displayName: ${JSON.stringify('<img src=x onerror=alert(1)>')}, sortOrder: 1, enabled: true }]; renderAvatars()`);
+  assert.match(ui.element("content").innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(ui.element("content").innerHTML, /<img src=x onerror/);
+  ui.run(`renderUsers([{ id: "u", email: ${JSON.stringify('<script>alert(1)</script>')}, role: "USER" }])`);
+  assert.match(ui.element("content").innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test("Admin keeps tokens in sessionStorage and removes both on logout", async () => {
+  const ui = app();
+  ui.run('saveTokens({ accessToken: "access-example", refreshToken: "refresh-example" })');
+  assert.equal(ui.storage.get("englishai_admin_access_token"), "access-example");
+  assert.equal(ui.storage.get("englishai_admin_refresh_token"), "refresh-example");
+  await ui.run('$("logout").onclick()');
+  assert.equal(ui.storage.size, 0);
+});
 
 test("Admin loads saved voice and speed from the scenario and renders live rate feedback", async () => {
   const ui = app();
