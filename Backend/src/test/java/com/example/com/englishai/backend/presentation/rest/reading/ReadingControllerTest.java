@@ -13,7 +13,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import java.time.Duration;
 import java.util.*;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -190,5 +192,31 @@ class ReadingControllerTest {
                 .content("{\"text\":\"" + "x".repeat(5001) + "\",\"difficulty\":\"BEGINNER\"}"))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(service);
+    }
+
+    @Test void rejectsLongNumericLookingSelectedOptionWithoutStallingAndRemainsUsable() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        UUID questionId = UUID.randomUUID();
+        when(tokens.validateAndGetUserId("test")).thenReturn(userId);
+
+        String malformedNumber = "1".repeat(20_000) + "x";
+        String maliciousBody = "{\"answers\":[{\"questionId\":\"" + questionId
+                + "\",\"selectedOption\":\"" + malformedNumber + "\"}]}";
+
+        assertTimeout(Duration.ofSeconds(1), () -> mvc.perform(post("/api/v1/reading/" + activityId + "/submit")
+                        .header("Authorization", "Bearer test").contentType("application/json").content(maliciousBody))
+                .andExpect(status().isBadRequest()));
+        verifyNoInteractions(service);
+
+        when(service.submit(eq(userId), eq(activityId), anyList())).thenReturn(new ReadingService.Submission(
+                activityId, 3, 3, 100,
+                com.example.com.englishai.backend.infrastructure.persistence.entity.ReadingActivityEntity.ReadingActivityStatus.SUCCESS,
+                ConversationDifficulty.INTERMEDIATE));
+        String validBody = "{\"answers\":[{\"questionId\":\"" + questionId + "\",\"selectedOption\":0}]}";
+        mvc.perform(post("/api/v1/reading/" + activityId + "/submit").header("Authorization", "Bearer test")
+                        .contentType("application/json").content(validBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.percentage").value(100));
     }
 }
