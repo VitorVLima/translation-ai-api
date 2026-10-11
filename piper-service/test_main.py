@@ -4,9 +4,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
+import asyncio
 from fastapi.testclient import TestClient
 
 import main
+from request_limits import BoundedSpeechRequest
 
 
 class FakeSynthesizer:
@@ -85,6 +87,48 @@ def test_missing_or_invalid_language_is_rejected(fake):
 def test_text_limit_is_rejected(fake):
     response = TestClient(main.app).post("/synthesize", json={"text": "x" * 3001, "language": "en"})
     assert response.status_code == 413
+
+
+def test_json_envelope_limit_prevents_synthesis(fake):
+    response = TestClient(main.app).post("/synthesize", content=b"x", headers={"content-length": "65537"})
+    assert response.status_code == 413
+    assert fake.calls == []
+
+
+def test_speech_admission_rejects_busy_and_chunked_oversize():
+    async def downstream(scope, receive, send):
+        raise AssertionError("oversized/busy request reached parser")
+
+    middleware = BoundedSpeechRequest(downstream, "/synthesize", 3)
+    scope = {"type": "http", "path": "/synthesize", "method": "POST", "headers": []}
+
+    async def exercise(messages):
+        sent = []
+        async def receive():
+            return messages.pop(0)
+        async def send(message):
+            sent.append(message)
+        await middleware(scope, receive, send)
+        return sent[0]["status"]
+
+    assert middleware._slot.acquire(blocking=False)
+    try:
+        assert asyncio.run(exercise([])) == 503
+    finally:
+        middleware._slot.release()
+    assert asyncio.run(exercise([
+        {"type": "http.request", "body": b"12", "more_body": True},
+        {"type": "http.request", "body": b"34", "more_body": False},
+    ])) == 413
+
+
+def test_oversized_wav_is_not_returned(monkeypatch, configured_piper):
+    monkeypatch.setattr(main, "MAX_AUDIO_BYTES", 8)
+    def run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"123456789")
+        return type("Result", (), {"returncode": 0})()
+    monkeypatch.setattr(main.subprocess, "run", run)
+    assert TestClient(main.app).post("/synthesize", json={"text": "Hello", "language": "en"}).status_code == 500
 
 
 def test_synthesis_failure_is_generic(fake):

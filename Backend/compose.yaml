@@ -32,6 +32,15 @@ services:
         source: ${WHISPER_MODEL_CACHE_DIR:?Set WHISPER_MODEL_CACHE_DIR to the prepared Hugging Face cache directory}
         target: /home/englishai/.cache/huggingface
         read_only: true
+    # Observed idle RSS ~691 MiB on the current CPU/small-model deployment.
+    # Validate inference peaks in isolation before tightening these ceilings.
+    mem_limit: ${WHISPER_MEMORY_LIMIT:-2g}
+    cpus: ${WHISPER_CPU_LIMIT:-2.0}
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
       interval: 10s
@@ -51,7 +60,7 @@ services:
       PIPER_EN_MODEL_PATH: ${PIPER_EN_MODEL_PATH:-/models/en/en_US-hfc_female-medium.onnx}
       PIPER_PT_MODEL_PATH: ${PIPER_PT_MODEL_PATH:-/models/pt/pt_BR-faber-medium.onnx}
       PIPER_MAX_TEXT_LENGTH: ${PIPER_MAX_TEXT_LENGTH:-3000}
-      PIPER_SYNTHESIS_TIMEOUT_SECONDS: ${PIPER_SYNTHESIS_TIMEOUT_SECONDS:-30}
+      PIPER_SYNTHESIS_TIMEOUT_SECONDS: ${PIPER_SYNTHESIS_TIMEOUT_SECONDS:-45}
       PIPER_EN_LENGTH_SCALE: ${PIPER_EN_LENGTH_SCALE:-1.0}
       PIPER_WARMUP_ENABLED: ${PIPER_WARMUP_ENABLED:-true}
       PIPER_LOG_LEVEL: ${PIPER_LOG_LEVEL:-INFO}
@@ -60,6 +69,13 @@ services:
         source: ../voices
         target: /models
         read_only: true
+    mem_limit: ${PIPER_MEMORY_LIMIT:-768m}
+    cpus: ${PIPER_CPU_LIMIT:-2.0}
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3)"]
       interval: 10s
@@ -87,6 +103,8 @@ services:
       - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
     volumes:
       - englishai_avatar_data:/var/lib/englishai/avatars
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       postgres:
         condition: service_healthy

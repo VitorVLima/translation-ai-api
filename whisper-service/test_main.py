@@ -2,6 +2,9 @@ from types import SimpleNamespace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import asyncio
+
+from request_limits import BoundedSpeechRequest
 
 import main
 
@@ -113,6 +116,49 @@ def test_internal_failure_is_generic(monkeypatch):
     response = TestClient(main.app).post("/transcribe", files={"file": ("voice.wav", b"audio", "audio/wav")})
     assert response.status_code == 500
     assert response.json() == {"detail": "Unable to transcribe audio"}
+
+
+def test_transcript_response_is_bounded(monkeypatch):
+    monkeypatch.setattr(main, "MAX_TRANSCRIPT_CHARACTERS", 4)
+    monkeypatch.setattr(main, "get_model", lambda: FakeTranscriber(text="12345"))
+    response = TestClient(main.app).post("/transcribe", files={"file": ("voice.wav", b"audio", "audio/wav")})
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Transcript is too long"}
+
+
+def test_transcribe_envelope_rejects_oversized_content_length_without_loading_model(monkeypatch):
+    monkeypatch.setattr(main, "get_model", lambda: (_ for _ in ()).throw(AssertionError("model used")))
+    response = TestClient(main.app).post(
+        "/transcribe", content=b"x", headers={"content-length": str(21 * 1024 * 1024 + 1)}
+    )
+    assert response.status_code == 413
+
+
+def test_speech_admission_rejects_busy_and_chunked_oversize():
+    async def downstream(scope, receive, send):
+        raise AssertionError("oversized/busy request reached parser")
+
+    middleware = BoundedSpeechRequest(downstream, "/transcribe", 3)
+    scope = {"type": "http", "path": "/transcribe", "method": "POST", "headers": []}
+
+    async def exercise(messages):
+        sent = []
+        async def receive():
+            return messages.pop(0)
+        async def send(message):
+            sent.append(message)
+        await middleware(scope, receive, send)
+        return sent[0]["status"]
+
+    assert middleware._slot.acquire(blocking=False)
+    try:
+        assert asyncio.run(exercise([])) == 503
+    finally:
+        middleware._slot.release()
+    assert asyncio.run(exercise([
+        {"type": "http.request", "body": b"12", "more_body": True},
+        {"type": "http.request", "body": b"34", "more_body": False},
+    ])) == 413
 
 
 def test_temporary_file_removed_after_success(monkeypatch):

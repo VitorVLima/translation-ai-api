@@ -11,6 +11,9 @@ from typing import Protocol
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from dotenv import load_dotenv
+from starlette.concurrency import run_in_threadpool
+
+from request_limits import BoundedSpeechRequest
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -20,6 +23,7 @@ logging.basicConfig(level=os.getenv("WHISPER_LOG_LEVEL", "INFO"))
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
 MAX_FILE_SIZE = int(os.getenv("WHISPER_MAX_FILE_SIZE_MB", "20")) * 1024 * 1024
+MAX_TRANSCRIPT_CHARACTERS = 65_536
 PRELOAD_MODEL = os.getenv("WHISPER_PRELOAD_MODEL", "false").strip().lower() in {"1", "true", "yes", "on"}
 _MISSING_LANGUAGE = "__automatic_detection__"
 
@@ -68,7 +72,14 @@ def transcribe_path(path: str, language: str | None = None, transcriber: Transcr
         segments, info = engine.transcribe(path)
     else:
         segments, info = engine.transcribe(path, language=language)
-    text = "".join(segment.text for segment in segments).strip()
+    parts = []
+    total_characters = 0
+    for segment in segments:
+        total_characters += len(segment.text)
+        if total_characters > MAX_TRANSCRIPT_CHARACTERS:
+            raise HTTPException(status_code=413, detail="Transcript is too long")
+        parts.append(segment.text)
+    text = "".join(parts).strip()
     language = getattr(info, "language", None) or "unknown"
     return {"text": text, "language": language}
 
@@ -102,6 +113,9 @@ async def save_upload(file: UploadFile) -> tuple[str, int, str, str | None]:
 
 
 app = FastAPI(title="EnglishAI Whisper Service")
+# The multipart envelope needs a little space beyond the backend's 20 MiB audio cap.
+app.add_middleware(BoundedSpeechRequest, path="/transcribe", max_body_bytes=21 * 1024 * 1024,
+                   max_concurrent=2)
 
 
 @app.on_event("startup")
@@ -126,18 +140,16 @@ async def transcribe(file: UploadFile, language: str = Form(default=_MISSING_LAN
         raise HTTPException(status_code=400, detail="Invalid language")
     path, size_bytes, extension, content_type = await save_upload(file)
     try:
-        return transcribe_path(path, language=language)
+        return await run_in_threadpool(transcribe_path, path, language=language)
     except HTTPException:
         raise
-    except Exception as error:
-        # This keeps the diagnostic limited to audio metadata and the decoder's
-        # technical error. It never records bytes or a transcript.
+    except Exception:
+        # Decoder exceptions can contain local paths or user-controlled metadata.
         logger.error(
-            "TRANSCRIPTION_FAILED extension=%s content_type=%s size_bytes=%d error=%s",
+            "TRANSCRIPTION_FAILED extension=%s content_type=%s size_bytes=%d",
             extension,
             content_type or "unknown",
             size_bytes,
-            str(error)[:300],
         )
         raise HTTPException(status_code=500, detail="Unable to transcribe audio")
     finally:

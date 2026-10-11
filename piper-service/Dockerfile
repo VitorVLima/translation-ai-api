@@ -13,7 +13,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY --chown=englishai:englishai main.py ./
+COPY --chown=englishai:englishai main.py request_limits.py ./
 
 USER englishai:englishai
 

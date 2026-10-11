@@ -18,6 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from request_limits import BoundedSpeechRequest
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -28,6 +29,7 @@ logging.basicConfig(level=os.getenv("PIPER_LOG_LEVEL", "INFO"))
 MAX_TEXT_LENGTH = int(os.getenv("PIPER_MAX_TEXT_LENGTH", "3000"))
 SYNTHESIS_TIMEOUT = float(os.getenv("PIPER_SYNTHESIS_TIMEOUT_SECONDS", "30"))
 WARMUP_ENABLED = os.getenv("PIPER_WARMUP_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
 
 
 class PiperSynthesisError(RuntimeError):
@@ -109,15 +111,19 @@ class PiperSynthesizer:
                 command,
                 input=text,
                 text=True,
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 timeout=self.timeout,
                 check=False,
             )
             if completed.returncode != 0:
                 raise PiperSynthesisError("Piper synthesis failed")
-            audio = Path(output_path).read_bytes()
+            with open(output_path, "rb") as output:
+                audio = output.read(MAX_AUDIO_BYTES + 1)
             if not audio:
                 raise PiperSynthesisError("Piper returned an empty audio file")
+            if len(audio) > MAX_AUDIO_BYTES:
+                raise PiperSynthesisError("Piper returned oversized audio")
             return audio
         except subprocess.TimeoutExpired as exc:
             raise PiperSynthesisError("Piper synthesis timed out") from exc
@@ -143,6 +149,8 @@ class SynthesizeRequest(BaseModel):
 
 
 app = FastAPI(title="EnglishAI Piper Service")
+app.add_middleware(BoundedSpeechRequest, path="/synthesize", max_body_bytes=64 * 1024,
+                   max_concurrent=2)
 _synthesizer: Synthesizer | None = None
 
 
