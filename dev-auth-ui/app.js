@@ -497,7 +497,7 @@ async function registerLocal(event) {
 function verificationError(result) {
   if (result.networkError) return "Não foi possível conectar ao servidor.";
   if (result.response.status === 429) return "Muitas tentativas. Aguarde antes de tentar novamente.";
-  if (result.response.status === 400) return result.body?.errors?.code ? "Informe um código de 6 dígitos." : "Código incorreto ou expirado.";
+  if (result.response.status === 400) return result.body?.errors?.code ? "Informe um código de 6 dígitos." : "Não foi possível confirmar o e-mail. Confira o código ou tente entrar na sua conta.";
   return "Não foi possível confirmar o e-mail.";
 }
 async function verifyEmail(event) {
@@ -518,7 +518,7 @@ async function resendVerification() {
   try {
     const result = await request("/api/v1/auth/resend-verification", { method: "POST", body: JSON.stringify({ email: pendingVerificationEmail }) });
     if (!result.response.ok) { updateVerificationCooldown(); return setMessage("verification-message", result.response.status === 429 ? "Muitas tentativas. Aguarde antes de tentar novamente." : "Não foi possível reenviar o código."); }
-    startVerificationCooldown(); setMessage("verification-message", "Um novo código foi enviado.", true);
+    startVerificationCooldown(); setMessage("verification-message", "Se a conta puder receber códigos, enviaremos um novo e-mail.", true);
   } catch (_) { updateVerificationCooldown(); setMessage("verification-message", "Não foi possível conectar ao servidor."); }
 }
 

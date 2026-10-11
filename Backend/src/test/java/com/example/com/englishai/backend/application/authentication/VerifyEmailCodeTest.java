@@ -94,10 +94,12 @@ class VerifyEmailCodeTest {
     }
 
     @Test
-    void alreadyVerifiedIsIdempotent() {
+    void alreadyVerifiedRejectsAnyCodeWithTheSamePublicError() {
         User user = new User(UUID.randomUUID(), "user@example.com", "user", "hash", at("11:00"), at("11:00"), true);
         when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
-        useCase.execute("user@example.com", "000042");
+        assertThatThrownBy(() -> useCase.execute("user@example.com", "000042"))
+                .isExactlyInstanceOf(InvalidEmailVerificationCodeException.class)
+                .hasMessage("Invalid or expired verification code");
         verifyNoInteractions(hasher, codes);
     }
 

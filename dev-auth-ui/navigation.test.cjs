@@ -397,7 +397,7 @@ test("Unverified login handles expired codes and server resend limits without pa
   await ui.run('loginLocal({ preventDefault() {}, submitter: document.createElement("button") })');
   ui.get("verification-code").value = "123456";
   await ui.run('verifyEmail({ preventDefault() {}, submitter: document.createElement("button") })');
-  assert.equal(ui.get("verification-message").textContent, "Código incorreto ou expirado.");
+  assert.equal(ui.get("verification-message").textContent, "Não foi possível confirmar o e-mail. Confira o código ou tente entrar na sua conta.");
   await ui.get("resend-verification").click();
   assert.equal(ui.get("verification-message").textContent, "Muitas tentativas. Aguarde antes de tentar novamente.");
   assert.equal(ui.get("verification-card").hidden, false);
@@ -494,7 +494,7 @@ test("Invalid or expired verification code keeps the screen and shows a safe err
   await ui.get("show-register").click(); ui.get("register-email").value = "learner@example.com"; ui.get("register-password").value = "secret1"; ui.get("register-password-confirm").value = "secret1";
   await ui.run('registerLocal({ preventDefault() {} })'); ui.get("verification-code").value = "123456"; await ui.run('verifyEmail({ preventDefault() {} })');
   assert.equal(ui.get("verification-card").hidden, false); assert.equal(ui.get("login-card").hidden, true);
-  assert.equal(ui.get("verification-message").textContent, "Código incorreto ou expirado."); await ui.run('showAuthMode("login")');
+  assert.equal(ui.get("verification-message").textContent, "Não foi possível confirmar o e-mail. Confira o código ou tente entrar na sua conta."); await ui.run('showAuthMode("login")');
 });
 
 test("Verification loading prevents duplicate submissions", async () => {

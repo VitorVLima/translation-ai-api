@@ -44,7 +44,7 @@ public class VerifyEmailCode {
         } catch (AmbiguousEmailAddressException exception) {
             throw new InvalidEmailVerificationCodeException();
         }
-        if (user.isEmailVerified()) return;
+        if (user.isEmailVerified()) throw new InvalidEmailVerificationCodeException();
 
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         EmailVerificationCode code = codes.findLatestActiveByUserIdForUpdate(user.getId(), now)

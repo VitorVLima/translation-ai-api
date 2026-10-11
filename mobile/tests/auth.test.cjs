@@ -150,6 +150,8 @@ test('tela compartilhada de verificação usa os endpoints reais e o cooldown do
   assert.match(read('src/features/auth/components/VerificationCodeInput.tsx'), /length: 6/);
   assert.match(source, /Confirmar e-mail/);
   assert.match(source, /Voltar para o login/);
+  assert.match(source, /Confira o código ou tente entrar na sua conta/);
+  assert.match(source, /Se a conta puder receber códigos/);
 });
 
 test('Google inválido, conflito e cancelamento continuam como estados explícitos', async () => {

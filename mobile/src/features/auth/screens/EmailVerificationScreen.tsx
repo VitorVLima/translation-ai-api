@@ -72,7 +72,7 @@ export function EmailVerificationScreen() {
       if (requestError instanceof VerifyEmailError) {
         switch (requestError.kind) {
           case 'network': setError('Não foi possível conectar ao servidor. Verifique sua conexão.'); break;
-          case 'invalidCode': setError('Código incorreto ou expirado.'); break;
+          case 'invalidCode': setError('Não foi possível confirmar o e-mail. Confira o código ou tente entrar na sua conta.'); break;
           case 'rateLimit': setError('Muitas tentativas. Aguarde antes de tentar novamente.'); break;
           default: setError('Não foi possível confirmar o e-mail agora. Tente novamente.');
         }
@@ -95,7 +95,7 @@ export function EmailVerificationScreen() {
     try {
       await resendEmailVerification({ email });
       startResendCooldown();
-      setMessage('Um novo código foi enviado para o seu e-mail.');
+      setMessage('Se a conta puder receber códigos, enviaremos um novo e-mail.');
     } catch (requestError) {
       if (requestError instanceof ResendEmailVerificationError) {
         switch (requestError.kind) {
