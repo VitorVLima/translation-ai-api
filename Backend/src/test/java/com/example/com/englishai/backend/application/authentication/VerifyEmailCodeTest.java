@@ -4,12 +4,15 @@ import com.example.com.englishai.backend.application.authentication.exception.In
 import com.example.com.englishai.backend.application.ports.*;
 import com.example.com.englishai.backend.domain.authentication.EmailVerificationCode;
 import com.example.com.englishai.backend.domain.user.User;
+import org.springframework.transaction.annotation.Transactional;
 import org.junit.jupiter.api.Test;
 
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -48,6 +51,37 @@ class VerifyEmailCodeTest {
                 .isExactlyInstanceOf(InvalidEmailVerificationCodeException.class)
                 .hasMessage("Invalid or expired verification code");
         verify(codes).save(argThat(c -> c.getAttempts() == 2));
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void failedAttemptsRemainCommitEligibleAndExhaustTheCode() throws Exception {
+        var transaction = VerifyEmailCode.class.getMethod("execute", String.class, String.class)
+                .getAnnotation(Transactional.class);
+        assertThat(transaction.noRollbackFor()).contains(InvalidEmailVerificationCodeException.class);
+
+        UUID id = UUID.randomUUID();
+        User user = new User(id, "user@example.com", "user", "hash", at("11:00"), at("11:00"), false);
+        AtomicReference<EmailVerificationCode> stored = new AtomicReference<>(new EmailVerificationCode(
+                UUID.randomUUID(), id, "expected", at("11:50"), at("13:00"), null, 0, 5));
+        when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
+        when(codes.findLatestActiveByUserIdForUpdate(eq(id), any()))
+                .thenAnswer(ignored -> Optional.of(stored.get()));
+        when(codes.save(any())).thenAnswer(invocation -> {
+            EmailVerificationCode updated = invocation.getArgument(0);
+            stored.set(updated);
+            return updated;
+        });
+        when(hasher.hash("111111")).thenReturn("wrong");
+        when(hasher.hash("000042")).thenReturn("expected");
+
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            assertThatThrownBy(() -> useCase.execute("user@example.com", "111111"))
+                    .isInstanceOf(InvalidEmailVerificationCodeException.class);
+            assertThat(stored.get().getAttempts()).isEqualTo(attempt);
+        }
+        assertThatThrownBy(() -> useCase.execute("user@example.com", "000042"))
+                .isInstanceOf(InvalidEmailVerificationCodeException.class);
         verify(users, never()).save(any());
     }
 

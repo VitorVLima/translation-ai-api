@@ -34,7 +34,7 @@ public class VerifyEmailCode {
         this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = InvalidEmailVerificationCodeException.class)
     public void execute(String email, String rawCode) {
         String normalizedEmail = EmailAddress.normalize(email);
         User user;
