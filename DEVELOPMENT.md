@@ -23,7 +23,7 @@ Flyway manages schema changes and Hibernate remains on ddl-auto=validate.
 
 The Backend exposes unauthenticated, status-only `GET /livez` and `GET /readyz` (also `/actuator/health/liveness` and `/actuator/health/readiness`). Liveness reflects the Spring process state; readiness also checks PostgreSQL. LLM, Whisper, Piper and SMTP are not contacted by probes. Other Actuator HTTP endpoints are unavailable, and JMX exposure is disabled. Existing AI timing/status logs remain the diagnostic source for provider failures.
 
-Development stores administrative runtime avatar images under `./data/profile-images` relative to the Backend process working directory. Production with `SPRING_PROFILES_ACTIVE=prod` or `production` requires `AVATAR_IMAGE_STORAGE_DIR` to be an existing, writable **absolute** directory. When the Backend runs in a container, mount a persistent volume or bind mount at this path. The current `Backend/compose.yaml` starts only PostgreSQL, so it cannot mount files into an application container; configure the Backend's own deployment separately. Back up and restore the avatar directory together with PostgreSQL, since the database stores asset keys while the image bytes live in the directory. Before changing the configured path, copy existing runtime files from the old directory. Multiple Backend instances need the same shared storage or object storage; separate local directories will diverge.
+Development stores administrative runtime avatar images under `./data/profile-images` relative to the Backend process working directory. Production with `SPRING_PROFILES_ACTIVE=prod` or `production` requires `AVATAR_IMAGE_STORAGE_DIR` to be an existing, writable **absolute** directory. The Docker Compose environment mounts a persistent avatar volume at this path. Back up and restore the avatar volume together with PostgreSQL, since the database stores asset keys while the image bytes live in the directory. Before changing the configured path, copy existing runtime files from the old directory. Multiple Backend instances need the same shared storage or object storage; separate local directories will diverge.
 
 ## Email por ambiente
 
@@ -46,6 +46,33 @@ uvicorn main:app --host 127.0.0.1 --port 8002
 ```
 
 Each service loads its own `.env`. Before the first local start, copy each service's `.env.example` to `.env` and configure it. Piper applies `PIPER_EN_LENGTH_SCALE` only to English; the code default is `1.0`, and a local `.env` can choose another supported value.
+
+## Docker Compose
+
+`Backend/compose.yaml` runs the Backend, PostgreSQL, Whisper and Piper together. Only the Backend is published to the host, on `127.0.0.1:8080` by default. PostgreSQL, Whisper and Piper have no host port mapping and communicate with the Backend through the internal Docker network as `postgres:5432`, `whisper:8001` and `piper:8002`.
+
+Docker Desktop (or a compatible Docker Engine with Compose) must be running. Start from the repository root after creating `Backend/.env` from `Backend/.env.example` and filling required secrets. For production, set `SPRING_PROFILES_ACTIVE=prod` and the required authenticated SMTP settings; the existing production profile rejects missing SMTP or `MAIL_PROVIDER=noop`.
+
+Whisper does not download a model during image build or startup. Set `WHISPER_MODEL_CACHE_DIR` in `Backend/.env` to the absolute host path of a prepared Hugging Face cache that contains the selected `WHISPER_MODEL` (the local default is `small`). The mount is read-only. Piper receives the existing `voices/` directory at `/models`, also read-only; `PIPER_EN_MODEL_PATH` and `PIPER_PT_MODEL_PATH` must use container paths such as `/models/en/en_US-hfc_female-medium.onnx`. Do not add either model store to Git.
+
+```powershell
+# Build and start the isolated environment.
+docker compose --env-file Backend/.env -f Backend/compose.yaml build
+docker compose --env-file Backend/.env -f Backend/compose.yaml up -d
+
+# Check status and health.
+docker compose --env-file Backend/.env -f Backend/compose.yaml ps
+Invoke-RestMethod http://127.0.0.1:8080/readyz
+
+# Follow logs, rebuild after source changes, or stop while preserving volumes.
+docker compose --env-file Backend/.env -f Backend/compose.yaml logs -f backend
+docker compose --env-file Backend/.env -f Backend/compose.yaml up -d --build
+docker compose --env-file Backend/.env -f Backend/compose.yaml down
+```
+
+Named volumes `englishai_postgres_data` and `englishai_avatar_data` persist database data and runtime avatar images. Back up and restore them together. A PostgreSQL backup can be produced with `pg_dump` from the `postgres` container; keep the resulting backup outside the repository and restore the matching avatar volume with it. The avatar volume must be writable by the non-root Backend user (UID 10001) when replaced by a host bind mount.
+
+The Backend also joins a separate egress network so configured SMTP and LLM providers remain reachable. PostgreSQL, Whisper and Piper join only the internal network. A reverse proxy, TLS termination and public exposure are deployment concerns outside this Compose file.
 
 ## Web clients
 

@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+target/
+data/
+.idea/
+HELP.md
+*.log
+hs_err_pid*.log
+replay_pid*.log

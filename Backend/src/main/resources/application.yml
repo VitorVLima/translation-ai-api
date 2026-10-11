@@ -2,6 +2,10 @@ spring:
   config:
     import: "optional:file:./Backend/.env[.properties],optional:file:./.env[.properties]"
 
+  docker:
+    compose:
+      enabled: ${SPRING_DOCKER_COMPOSE_ENABLED:true}
+
   application:
     name: english-ai
 

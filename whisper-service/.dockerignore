@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+*.py[cod]
+*.wav
+*.onnx
+*.onnx.json
+README.md
+test_main.py

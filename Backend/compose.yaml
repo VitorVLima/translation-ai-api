@@ -1,12 +1,9 @@
+name: englishai
+
 services:
   postgres:
-    image: 'postgres:18.6'
-    environment:
-      - 'POSTGRES_DB=${POSTGRES_DB:-mydatabase}'
-      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Backend/.env}'
-      - 'POSTGRES_USER=${POSTGRES_USER:-myuser}'
-    ports:
-      - '${DB_BIND_ADDRESS:-127.0.0.1}:${DB_PORT:-5434}:5432'
+    image: postgres:18.6
+    env_file: ${ENGLISHAI_ENV_FILE:-./.env}
     volumes:
       - englishai_postgres_data:/var/lib/postgresql
     healthcheck:
@@ -15,6 +12,104 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+    networks:
+      - englishai-internal
+
+  whisper:
+    build:
+      context: ../whisper-service
+      dockerfile: Dockerfile
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_MAX_FILE_SIZE_MB: ${WHISPER_MAX_FILE_SIZE_MB:-20}
+      WHISPER_PRELOAD_MODEL: ${WHISPER_PRELOAD_MODEL:-true}
+      WHISPER_LOG_LEVEL: ${WHISPER_LOG_LEVEL:-INFO}
+    volumes:
+      - type: bind
+        source: ${WHISPER_MODEL_CACHE_DIR:?Set WHISPER_MODEL_CACHE_DIR to the prepared Hugging Face cache directory}
+        target: /home/englishai/.cache/huggingface
+        read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - englishai-internal
+
+  piper:
+    build:
+      context: ../piper-service
+      dockerfile: Dockerfile
+    environment:
+      PIPER_EXECUTABLE: ${PIPER_EXECUTABLE:-piper}
+      PIPER_EN_MODEL_PATH: ${PIPER_EN_MODEL_PATH:-/models/en/en_US-hfc_female-medium.onnx}
+      PIPER_PT_MODEL_PATH: ${PIPER_PT_MODEL_PATH:-/models/pt/pt_BR-faber-medium.onnx}
+      PIPER_MAX_TEXT_LENGTH: ${PIPER_MAX_TEXT_LENGTH:-3000}
+      PIPER_SYNTHESIS_TIMEOUT_SECONDS: ${PIPER_SYNTHESIS_TIMEOUT_SECONDS:-30}
+      PIPER_EN_LENGTH_SCALE: ${PIPER_EN_LENGTH_SCALE:-1.0}
+      PIPER_WARMUP_ENABLED: ${PIPER_WARMUP_ENABLED:-true}
+      PIPER_LOG_LEVEL: ${PIPER_LOG_LEVEL:-INFO}
+    volumes:
+      - type: bind
+        source: ../voices
+        target: /models
+        read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - englishai-internal
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: ${ENGLISHAI_ENV_FILE:-./.env}
+    environment:
+      SERVER_PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      WHISPER_BASE_URL: http://whisper:8001
+      PIPER_BASE_URL: http://piper:8002
+      AVATAR_IMAGE_STORAGE_DIR: /var/lib/englishai/avatars
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - englishai_avatar_data:/var/lib/englishai/avatars
+    depends_on:
+      postgres:
+        condition: service_healthy
+      whisper:
+        condition: service_started
+      piper:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - englishai-internal
+      - englishai-egress
 
 volumes:
   englishai_postgres_data:
+  englishai_avatar_data:
+
+networks:
+  englishai-internal:
+    internal: true
+  englishai-egress:
