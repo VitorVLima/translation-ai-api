@@ -31,6 +31,8 @@ public class AuthenticationRateLimitFilter extends OncePerRequestFilter {
     private final Duration resendWindow;
     private final int resetCapacity;
     private final Duration resetWindow;
+    private final int forgotCapacity;
+    private final Duration forgotWindow;
     private final int googleCapacity;
     private final Duration googleWindow;
 
@@ -42,6 +44,7 @@ public class AuthenticationRateLimitFilter extends OncePerRequestFilter {
                                          int verifyEmailCapacity, Duration verifyEmailWindow,
                                          int resendCapacity, Duration resendWindow,
                                          int resetCapacity, Duration resetWindow,
+                                         int forgotCapacity, Duration forgotWindow,
                                          int googleCapacity, Duration googleWindow) {
         this.service = service; this.ipResolver = ipResolver;
         this.loginCapacity = loginCapacity; this.loginWindow = loginWindow;
@@ -51,6 +54,7 @@ public class AuthenticationRateLimitFilter extends OncePerRequestFilter {
         this.verifyEmailCapacity = verifyEmailCapacity; this.verifyEmailWindow = verifyEmailWindow;
         this.resendCapacity = resendCapacity; this.resendWindow = resendWindow;
         this.resetCapacity = resetCapacity; this.resetWindow = resetWindow;
+        this.forgotCapacity = forgotCapacity; this.forgotWindow = forgotWindow;
         this.googleCapacity = googleCapacity; this.googleWindow = googleWindow;
     }
 
@@ -67,7 +71,8 @@ public class AuthenticationRateLimitFilter extends OncePerRequestFilter {
         else if (path.equals("/api/v1/auth/verify-email")) { bucket = "verify-email:ip:"; capacity = verifyEmailCapacity; window = verifyEmailWindow; }
         else if (path.equals("/api/v1/auth/resend-verification")) { bucket = "resend-verification:ip:"; capacity = resendCapacity; window = resendWindow; }
         else if (path.equals("/api/v1/auth/reset-password")) { bucket = "reset-password:ip:"; capacity = resetCapacity; window = resetWindow; }
-        else if (path.equals("/api/v1/auth/validate-reset-code")) { bucket = "reset-password:ip:"; capacity = resetCapacity; window = resetWindow; }
+        else if (path.equals("/api/v1/auth/validate-reset-code")) { bucket = "validate-reset-code:ip:"; capacity = resetCapacity; window = resetWindow; }
+        else if (path.equals("/api/v1/auth/forgot-password")) { bucket = "forgot-password:ip:"; capacity = forgotCapacity; window = forgotWindow; }
         else if (path.equals("/api/v1/auth/google")) { bucket = "google-login:ip:"; capacity = googleCapacity; window = googleWindow; }
         if (bucket == null) { chain.doFilter(request, response); return; }
         var decision = service.tryConsume(bucket + ipResolver.resolve(request), capacity, window);

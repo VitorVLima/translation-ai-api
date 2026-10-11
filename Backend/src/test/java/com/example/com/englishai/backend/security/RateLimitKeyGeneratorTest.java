@@ -14,9 +14,11 @@ class RateLimitKeyGeneratorTest {
     @Test
     void shouldNormalizeEmailAndGenerateStableOpaqueKey() {
         RateLimitKeyGenerator generator = new RateLimitKeyGenerator(secret);
-        assertThat(generator.accountKey(" User@Test.COM "))
-                .isEqualTo(generator.accountKey("user@test.com"))
+        assertThat(generator.accountKey("login", " User@Test.COM "))
+                .isEqualTo(generator.accountKey("login", "user@test.com"))
                 .doesNotContain("user@test.com");
+        assertThat(generator.accountKey("verify-email", "user@test.com"))
+                .isNotEqualTo(generator.accountKey("login", "user@test.com"));
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
@@ -34,6 +35,7 @@ public class RequestPasswordReset {
     private final PasswordResetCodeHasher hasher;
     private final EmailSender sender;
     private final Duration expiration;
+    private final Duration requestCooldown;
     private final int max;
     private final Clock clock;
     private final TransactionTemplate transactions;
@@ -44,13 +46,15 @@ public class RequestPasswordReset {
                                 EmailSender sender, @Qualifier("passwordResetCodeExpiration") Duration expiration,
                                 @Qualifier("passwordResetMaxAttempts") Integer max,
                                 @Qualifier("refreshTokenClock") Clock clock,
-                                PlatformTransactionManager transactionManager) {
+                                PlatformTransactionManager transactionManager,
+                                @Value("${SECURITY_PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS:60}") long cooldownSeconds) {
         this.users = users;
         this.codes = codes;
         this.generator = generator;
         this.hasher = hasher;
         this.sender = sender;
         this.expiration = expiration;
+        this.requestCooldown = cooldown(cooldownSeconds);
         this.max = max;
         this.clock = clock;
         this.transactions = new TransactionTemplate(transactionManager);
@@ -67,6 +71,7 @@ public class RequestPasswordReset {
         this.hasher = hasher;
         this.sender = sender;
         this.expiration = expiration;
+        this.requestCooldown = Duration.ofSeconds(60);
         this.max = max;
         this.clock = clock;
         this.transactions = null;
@@ -91,7 +96,11 @@ public class RequestPasswordReset {
         if (user == null) return null;
 
         var now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-        for (var old : codes.findByUserIdForUpdate(user.getId())) {
+        var existing = codes.findByUserIdForUpdate(user.getId());
+        if (existing.stream().anyMatch(code -> code.getCreatedAt().plus(requestCooldown).isAfter(now))) {
+            return null;
+        }
+        for (var old : existing) {
             if (old.getUsedAt() == null && old.getInvalidatedAt() == null) codes.save(old.invalidate(now));
         }
         var raw = generator.generate();
@@ -110,5 +119,10 @@ public class RequestPasswordReset {
     }
 
     private record PendingEmail(String email, String code) {}
+
+    private static Duration cooldown(long seconds) {
+        if (seconds < 0) throw new IllegalArgumentException("Password reset request cooldown must not be negative");
+        return Duration.ofSeconds(seconds);
+    }
 }
 

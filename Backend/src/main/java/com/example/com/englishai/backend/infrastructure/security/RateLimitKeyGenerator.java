@@ -18,9 +18,12 @@ public class RateLimitKeyGenerator {
         if (secret.length < 32) throw new IllegalArgumentException("Rate limit key secret must contain at least 32 bytes");
     }
 
-    public String accountKey(String email) {
+    public String accountKey(String operation, String email) {
+        if (operation == null || !operation.matches("[a-z-]+")) {
+            throw new IllegalArgumentException("Invalid rate limit operation");
+        }
         String normalized = email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
-        return "login:account:" + hex(hmac(normalized));
+        return operation + ":account:" + hex(hmac(normalized));
     }
 
     private byte[] hmac(String value) {

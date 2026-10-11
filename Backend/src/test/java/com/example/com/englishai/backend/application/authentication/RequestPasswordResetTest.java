@@ -6,6 +6,7 @@ import com.example.com.englishai.backend.application.ports.PasswordResetCodeHash
 import com.example.com.englishai.backend.application.ports.PasswordResetCodeRepository;
 import com.example.com.englishai.backend.application.ports.UserRepository;
 import com.example.com.englishai.backend.domain.user.User;
+import com.example.com.englishai.backend.domain.authentication.PasswordResetCode;
 import com.example.com.englishai.backend.application.user.exception.AmbiguousEmailAddressException;
 import org.junit.jupiter.api.Test;
 
@@ -87,6 +88,38 @@ class RequestPasswordResetTest {
 
         verifyNoInteractions(codes, generator, hasher, sender);
         verify(users, never()).save(any());
+    }
+
+    @Test
+    void recentPersistedRequestSuppressesAnotherCodeAndEmail() {
+        User user = new User(UUID.randomUUID(), "user@example.com", "user", "hash",
+                at("11:00"), at("11:00"), true);
+        when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
+        when(codes.findByUserIdForUpdate(user.getId())).thenReturn(List.of(new PasswordResetCode(
+                UUID.randomUUID(), user.getId(), "hash", OffsetDateTime.parse("2026-01-01T11:59:30Z"), at("12:09"),
+                null, null, 0, 5)));
+
+        request.execute("user@example.com");
+
+        verifyNoInteractions(generator, hasher, sender);
+        verify(codes, never()).save(any());
+    }
+
+    @Test
+    void requestAfterCooldownReplacesCodeAndSendsOnce() {
+        User user = new User(UUID.randomUUID(), "user@example.com", "user", "hash",
+                at("11:00"), at("11:00"), true);
+        when(users.findByEmailForUpdate("user@example.com")).thenReturn(Optional.of(user));
+        when(codes.findByUserIdForUpdate(user.getId())).thenReturn(List.of(new PasswordResetCode(
+                UUID.randomUUID(), user.getId(), "old-hash", at("11:58"), at("12:08"),
+                null, null, 0, 5)));
+        when(generator.generate()).thenReturn("123456");
+        when(hasher.hash("123456")).thenReturn("new-hash");
+
+        request.execute("user@example.com");
+
+        verify(codes, org.mockito.Mockito.times(2)).save(any());
+        verify(sender).sendPasswordResetCode("user@example.com", "123456");
     }
 
     private static OffsetDateTime at(String time) {
