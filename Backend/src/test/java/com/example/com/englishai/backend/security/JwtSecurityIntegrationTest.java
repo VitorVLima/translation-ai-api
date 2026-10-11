@@ -5,6 +5,8 @@ import com.example.com.englishai.backend.application.authentication.RegisterUser
 import com.example.com.englishai.backend.application.authentication.RefreshAccessToken;
 import com.example.com.englishai.backend.application.authentication.LogoutSession;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
+import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamily;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenGenerator;
 import com.example.com.englishai.backend.infrastructure.security.JwtTokenValidator;
 import com.example.com.englishai.backend.infrastructure.security.SecurityConfig;
@@ -30,10 +32,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.OffsetDateTime;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.unauthenticated;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,6 +51,7 @@ class JwtSecurityIntegrationTest {
 
     private static final String SECRET = randomSecret();
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-09T12:00:00Z"), ZoneOffset.UTC);
+    private static final UUID FAMILY_ID = UUID.randomUUID();
     private final MockMvc mockMvc;
 
     @MockitoBean
@@ -58,6 +64,7 @@ class JwtSecurityIntegrationTest {
 
     @MockitoBean
     private LogoutSession logoutSession;
+    @MockitoBean private RefreshTokenFamilyRepository families;
 
     @Autowired
     JwtSecurityIntegrationTest(MockMvc mockMvc) {
@@ -67,7 +74,10 @@ class JwtSecurityIntegrationTest {
     @Test
     void shouldAllowValidTokenOnlyForCurrentRequestWithoutSession() throws Exception {
         UUID userId = UUID.randomUUID();
-        String token = new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId);
+        when(families.findById(FAMILY_ID)).thenReturn(Optional.of(new RefreshTokenFamily(FAMILY_ID,
+                userId, OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(CLOCK.instant().plusSeconds(3600), ZoneOffset.UTC), null)));
+        String token = new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId, FAMILY_ID);
 
         mockMvc.perform(get("/test/protected").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -88,9 +98,9 @@ class JwtSecurityIntegrationTest {
     void shouldRejectInvalidTokensWithSameSafeResponse(String scenario) throws Exception {
         String token = switch (scenario) {
             case "expired" -> new JwtTokenGenerator(SECRET, Duration.ofSeconds(1),
-                    Clock.offset(CLOCK, Duration.ofMinutes(-1))).generate(UUID.randomUUID());
+                    Clock.offset(CLOCK, Duration.ofMinutes(-1))).generate(UUID.randomUUID(), UUID.randomUUID());
             case "wrong-key" -> new JwtTokenGenerator(randomSecret(), Duration.ofMinutes(15), CLOCK)
-                    .generate(UUID.randomUUID());
+                    .generate(UUID.randomUUID(), UUID.randomUUID());
             default -> "not-a-jwt";
         };
 
@@ -130,8 +140,8 @@ class JwtSecurityIntegrationTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class TokenConfiguration {
         @Bean
-        AuthenticationTokenValidator tokenValidator() {
-            return new JwtTokenValidator(SECRET, CLOCK);
+        AuthenticationTokenValidator tokenValidator(RefreshTokenFamilyRepository families) {
+            return new JwtTokenValidator(SECRET, CLOCK, families);
         }
     }
 

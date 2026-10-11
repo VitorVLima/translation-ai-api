@@ -62,6 +62,31 @@ test("Admin keeps tokens in sessionStorage and removes both on logout", async ()
   assert.equal(ui.storage.size, 0);
 });
 
+test("Admin refreshes a legacy access token once and saves the rotated token family", async () => {
+  const ui = app();
+  const calls = [];
+  ui.run('saveTokens({ accessToken: "legacy-access", refreshToken: "still-valid-refresh" })');
+  ui.sandbox.fetch = async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    const auth = options.headers?.Authorization;
+    calls.push({ path, auth, body: options.body ? JSON.parse(options.body) : null });
+    let status = 200;
+    let body = { id: "user-id", role: "ADMIN" };
+    if (path === "/api/v1/users/me" && auth === "Bearer legacy-access") status = 401;
+    if (path === "/api/v1/auth/refresh") body = { accessToken: "session-access", refreshToken: "rotated-refresh" };
+    return { status, ok: status >= 200 && status < 300, json: async () => body };
+  };
+
+  const result = await ui.run('api("/api/v1/users/me")');
+
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(calls.map(call => call.path), ["/api/v1/users/me", "/api/v1/auth/refresh", "/api/v1/users/me"]);
+  assert.equal(calls[1].body.refreshToken, "still-valid-refresh");
+  assert.equal(calls[2].auth, "Bearer session-access");
+  assert.equal(ui.storage.get("englishai_admin_access_token"), "session-access");
+  assert.equal(ui.storage.get("englishai_admin_refresh_token"), "rotated-refresh");
+});
+
 test("Admin loads saved voice and speed from the scenario and renders live rate feedback", async () => {
   const ui = app();
   await ui.run(`scenarioForm(${JSON.stringify(scenario)})`);

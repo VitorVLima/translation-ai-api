@@ -72,20 +72,21 @@ public class LoginWithGoogle {
                 throw new AuthenticationMethodConflictException();
             }
         }
-        String accessToken = access.generate(user.getId());
         User authenticatedUser = user;
-        String refreshToken = transaction.execute(repository -> issueRefreshToken(authenticatedUser, repository));
-        return new LoginResult(authenticatedUser, accessToken, refreshToken);
+        IssuedSession session = transaction.execute(repository -> issueRefreshToken(authenticatedUser, repository));
+        String accessToken = access.generate(user.getId(), session.familyId());
+        return new LoginResult(authenticatedUser, accessToken, session.refreshToken());
     }
 
     private OffsetDateTime now() { return OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC); }
-    private String issueRefreshToken(User user, RefreshTokenRepository repository) {
+    private IssuedSession issueRefreshToken(User user, RefreshTokenRepository repository) {
         String raw = refresh.generate(); String tokenHash = hasher.hash(raw); OffsetDateTime created = now();
         UUID familyId = UUID.randomUUID(); OffsetDateTime familyExpires = created.plus(familyLifetime);
         families.save(new RefreshTokenFamily(familyId, user.getId(), created, familyExpires, null));
         repository.save(new RefreshToken(UUID.randomUUID(), user.getId(), familyId, tokenHash,
                 min(created.plus(refreshDuration), familyExpires), created, null, null));
-        return raw;
+        return new IssuedSession(familyId, raw);
     }
+    private record IssuedSession(UUID familyId, String refreshToken) {}
     private static OffsetDateTime min(OffsetDateTime a, OffsetDateTime b) { return a.isBefore(b) ? a : b; }
 }

@@ -34,9 +34,9 @@ class LoginWithGoogleTest {
         User saved = new User(UUID.randomUUID(), "new@example.com", "New User", null,
                 OffsetDateTime.parse("2026-01-01T00:00:00Z"), OffsetDateTime.parse("2026-01-01T00:00:00Z"), true);
         when(users.save(any())).thenReturn(saved);
-        when(access.generate(saved.getId())).thenReturn("access");
+        when(access.generate(eq(saved.getId()), any(UUID.class))).thenReturn("access");
         when(refresh.generate()).thenReturn("refresh"); when(hasher.hash("refresh")).thenReturn("hash");
-        when(transaction.execute(any())).thenAnswer(inv -> ((Function<RefreshTokenRepository, String>) inv.getArgument(0))
+        when(transaction.execute(any())).thenAnswer(inv -> ((Function<RefreshTokenRepository, ?>) inv.getArgument(0))
                 .apply(mock(RefreshTokenRepository.class)));
 
         LoginResult result = login.execute("credential", "nonce");
@@ -45,7 +45,9 @@ class LoginWithGoogleTest {
         assertThat(result.user().isEmailVerified()).isTrue();
         assertThat(result.user().getUsername()).isEqualTo("New User");
         verify(identities).save(any(ExternalIdentity.class));
-        verify(families).save(any(RefreshTokenFamily.class));
+        var savedFamily = org.mockito.ArgumentCaptor.forClass(RefreshTokenFamily.class);
+        verify(families).save(savedFamily.capture());
+        verify(access).generate(saved.getId(), savedFamily.getValue().getId());
     }
 
     @Test
@@ -58,14 +60,17 @@ class LoginWithGoogleTest {
         when(identities.findByProviderAndSubject(ExternalAuthProvider.GOOGLE, "sub-1"))
                 .thenReturn(Optional.of(new ExternalIdentity(UUID.randomUUID(), userId, ExternalAuthProvider.GOOGLE, "sub-1", OffsetDateTime.now())));
         when(users.findById(userId)).thenReturn(Optional.of(user));
-        when(access.generate(userId)).thenReturn("access");
-        when(transaction.execute(any())).thenAnswer(inv -> "refresh");
+        when(access.generate(eq(userId), any(UUID.class))).thenReturn("access");
+        when(refresh.generate()).thenReturn("refresh");
+        when(hasher.hash("refresh")).thenReturn("hash");
+        when(transaction.execute(any())).thenAnswer(inv -> ((Function<RefreshTokenRepository, ?>) inv.getArgument(0))
+                .apply(mock(RefreshTokenRepository.class)));
 
         login.execute("credential", "nonce");
 
         verify(users, never()).save(any());
         verify(identities, never()).save(any());
-        verify(access).generate(userId);
+        verify(access).generate(eq(userId), any(UUID.class));
     }
 
     @Test
@@ -75,10 +80,10 @@ class LoginWithGoogleTest {
                 ExternalAuthProvider.GOOGLE, "sub-2", "Google.User@Example.COM", true, "Google User"));
         when(users.findByEmail("google.user@example.com")).thenReturn(Optional.empty());
         when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(access.generate(any())).thenReturn("access");
+        when(access.generate(any(UUID.class), any(UUID.class))).thenReturn("access");
         when(refresh.generate()).thenReturn("refresh");
         when(hasher.hash("refresh")).thenReturn("hash");
-        when(transaction.execute(any())).thenAnswer(invocation -> ((Function<RefreshTokenRepository, String>) invocation.getArgument(0))
+        when(transaction.execute(any())).thenAnswer(invocation -> ((Function<RefreshTokenRepository, ?>) invocation.getArgument(0))
                 .apply(mock(RefreshTokenRepository.class)));
 
         LoginResult result = login.execute("credential", "nonce");

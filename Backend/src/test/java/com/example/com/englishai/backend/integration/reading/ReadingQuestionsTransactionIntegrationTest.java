@@ -215,7 +215,7 @@ class ReadingQuestionsTransactionIntegrationTest {
         activities.saveAndFlush(new ReadingActivityEntity(activityId, owner, ConversationDifficulty.INTERMEDIATE,
                 ReadingTopic.TRAVEL, "A Village Visit", "We visited a village.", now));
 
-        String token = tokenGenerator.generate(owner);
+        String token = sessionToken(owner);
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .post("/api/v1/reading/questions")
                         .header("Authorization", "Bearer " + token)
@@ -269,7 +269,7 @@ class ReadingQuestionsTransactionIntegrationTest {
         UUID owner = UUID.randomUUID(); owners.add(owner);
         users.saveAndFlush(new UserEntity(owner, "reading-invalid-id-" + owner + "@test.com",
                 "readinginvalid" + owner.toString().replace("-", ""), "hash", now, now));
-        String token = tokenGenerator.generate(owner);
+        String token = sessionToken(owner);
         String body = "{\"answers\":[{\"questionId\":\"1\",\"selectedOption\":0},"
                 + "{\"questionId\":\"1\",\"selectedOption\":0},{\"questionId\":\"1\",\"selectedOption\":0}]}";
 
@@ -278,5 +278,12 @@ class ReadingQuestionsTransactionIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+    }
+    private String sessionToken(UUID owner) {
+        UUID familyId = UUID.randomUUID();
+        var issuedAt = OffsetDateTime.now(java.time.ZoneOffset.UTC);
+        jdbc.update("insert into refresh_token_families (id, user_id, created_at, expires_at) values (?, ?, ?, ?)",
+                familyId, owner, issuedAt, issuedAt.plusDays(7));
+        return tokenGenerator.generate(owner, familyId);
     }
 }

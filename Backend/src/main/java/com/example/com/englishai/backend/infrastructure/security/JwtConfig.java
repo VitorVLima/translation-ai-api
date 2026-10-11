@@ -2,6 +2,7 @@ package com.example.com.englishai.backend.infrastructure.security;
 
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenGenerator;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,12 +18,13 @@ public class JwtConfig {
             @Value("${security.jwt.secret}") String secret,
             @Value("${security.jwt.clock-skew-seconds:60}") long clockSkewSeconds,
             @Value("${security.jwt.issuer:englishai}") String issuer,
-            @Value("${security.jwt.audience:englishai-api}") String audience
+            @Value("${security.jwt.audience:englishai-api}") String audience,
+            RefreshTokenFamilyRepository families
     ) {
         if (clockSkewSeconds < 0) {
             throw new IllegalArgumentException("JWT clock skew must not be negative");
         }
-        return new JwtTokenValidator(secret, Clock.systemUTC(), Duration.ofSeconds(clockSkewSeconds), issuer, audience);
+        return new JwtTokenValidator(secret, Clock.systemUTC(), Duration.ofSeconds(clockSkewSeconds), issuer, audience, families);
     }
 
     @Bean

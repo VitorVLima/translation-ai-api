@@ -4,6 +4,8 @@ import com.example.com.englishai.backend.application.chat.ChatWithTutor;
 import com.example.com.englishai.backend.application.chat.ChatWithTutorResult;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenGenerator;
 import com.example.com.englishai.backend.infrastructure.persistence.entity.UserEntity;
+import com.example.com.englishai.backend.infrastructure.persistence.entity.RefreshTokenFamilyEntity;
+import com.example.com.englishai.backend.infrastructure.persistence.repository.RefreshTokenFamilyJpaRepository;
 import com.example.com.englishai.backend.infrastructure.persistence.repository.UserJpaRepository;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -28,6 +30,7 @@ class AiWorkloadHttpIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired AuthenticationTokenGenerator tokens;
     @Autowired UserJpaRepository users;
+    @Autowired RefreshTokenFamilyJpaRepository families;
     @MockitoBean ChatWithTutor chat;
 
     @Test void realJwtChainLimitsOneAccountAndPreservesAnother() throws Exception {
@@ -40,7 +43,10 @@ class AiWorkloadHttpIntegrationTest {
         try {
             when(chat.execute(any())).thenReturn(new ChatWithTutorResult("Hello", false, null));
             String body = "{\"message\":\"Hello\",\"language\":\"en\"}";
-            String firstToken = tokens.generate(first), secondToken = tokens.generate(second);
+            UUID firstFamily = UUID.randomUUID(), secondFamily = UUID.randomUUID();
+            families.saveAndFlush(new RefreshTokenFamilyEntity(firstFamily, first, now, now.plusDays(7), null));
+            families.saveAndFlush(new RefreshTokenFamilyEntity(secondFamily, second, now, now.plusDays(7), null));
+            String firstToken = tokens.generate(first, firstFamily), secondToken = tokens.generate(second, secondFamily);
             mvc.perform(post("/api/v1/chat").header("Authorization", "Bearer " + firstToken)
                     .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
             mvc.perform(post("/api/v1/chat").header("Authorization", "Bearer " + firstToken)

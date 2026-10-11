@@ -4,5 +4,5 @@ import java.util.UUID;
 
 public interface AuthenticationTokenGenerator {
 
-    String generate(UUID userId);
+    String generate(UUID userId, UUID familyId);
 }

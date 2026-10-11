@@ -54,7 +54,7 @@ class LoginUserTest {
     @BeforeEach
     void executeTransactionCallbackImmediately() {
         when(refreshTokenTransaction.execute(any())).thenAnswer(invocation -> {
-            Function<RefreshTokenRepository, String> operation = invocation.getArgument(0);
+            Function<RefreshTokenRepository, ?> operation = invocation.getArgument(0);
             return operation.apply(refreshTokenRepository);
         });
     }
@@ -64,7 +64,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("correct-password", user.getPasswordHash())).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("test-access-token");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("test-access-token");
         when(refreshTokenGenerator.generate()).thenReturn("test-refresh-token");
         when(refreshTokenHasher.hash("test-refresh-token")).thenReturn("refresh-hash");
 
@@ -92,6 +92,7 @@ class LoginUserTest {
         assertThat(family.getCreatedAt()).isEqualTo(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         assertThat(family.getExpiresAt()).isEqualTo(OffsetDateTime.ofInstant(NOW.plus(Duration.ofDays(30)), ZoneOffset.UTC));
         assertThat(family.getRevokedAt()).isNull();
+        verify(accessTokenGenerator).generate(user.getId(), family.getId());
         verify(refreshTokenTransaction).execute(any());
         verify(passwordEncoder, never()).matchesDummy(anyString());
     }
@@ -101,7 +102,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches(anyString(), eq(user.getPasswordHash()))).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("access");
         when(refreshTokenGenerator.generate()).thenReturn("first", "second");
         when(refreshTokenHasher.hash(anyString())).thenReturn("hash-1", "hash-2");
 
@@ -123,7 +124,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches(anyString(), eq(user.getPasswordHash()))).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("access");
         when(refreshTokenGenerator.generate()).thenReturn("raw");
         when(refreshTokenHasher.hash("raw")).thenReturn("hash");
 
@@ -155,7 +156,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("correct-password", user.getPasswordHash())).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("access");
         when(refreshTokenGenerator.generate()).thenReturn("refresh");
         when(refreshTokenHasher.hash("refresh")).thenReturn("hash");
 
@@ -171,7 +172,7 @@ class LoginUserTest {
                 OffsetDateTime.now(), OffsetDateTime.now(), true);
         when(userRepository.findByEmail(resetUser.getEmail())).thenReturn(Optional.of(resetUser));
         when(passwordEncoder.matches("new-password", "new-password-hash")).thenReturn(true);
-        when(accessTokenGenerator.generate(resetUser.getId())).thenReturn("access-after-reset");
+        when(accessTokenGenerator.generate(eq(resetUser.getId()), any(UUID.class))).thenReturn("access-after-reset");
         when(refreshTokenGenerator.generate()).thenReturn("refresh-after-reset");
         when(refreshTokenHasher.hash("refresh-after-reset")).thenReturn("refresh-hash-after-reset");
 
@@ -201,7 +202,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("password", user.getPasswordHash())).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("access");
         when(refreshTokenGenerator.generate()).thenReturn("raw-refresh");
         when(refreshTokenHasher.hash("raw-refresh")).thenReturn("refresh-hash");
         when(refreshTokenFamilyRepository.save(any())).thenThrow(new IllegalStateException("family failure"));
@@ -245,7 +246,7 @@ class LoginUserTest {
         User user = createUser();
         when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("password", user.getPasswordHash())).thenReturn(true);
-        when(accessTokenGenerator.generate(user.getId())).thenReturn("access");
+        when(accessTokenGenerator.generate(eq(user.getId()), any(UUID.class))).thenReturn("access");
         when(refreshTokenGenerator.generate()).thenReturn("raw-refresh");
         when(refreshTokenHasher.hash("raw-refresh")).thenReturn("refresh-hash");
         when(refreshTokenRepository.save(any())).thenThrow(new IllegalStateException("token failure"));

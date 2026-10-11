@@ -102,12 +102,12 @@ public class LoginUser {
             throw new EmailVerificationRequiredException();
         }
 
-        String accessToken = accessTokenGenerator.generate(user.getId());
-        String refreshToken = refreshTokenTransaction.execute(repository -> issueRefreshToken(user, repository));
-        return new LoginResult(user, accessToken, refreshToken);
+        IssuedSession session = refreshTokenTransaction.execute(repository -> issueRefreshToken(user, repository));
+        String accessToken = accessTokenGenerator.generate(user.getId(), session.familyId());
+        return new LoginResult(user, accessToken, session.refreshToken());
     }
 
-    private String issueRefreshToken(User user, RefreshTokenRepository repository) {
+    private IssuedSession issueRefreshToken(User user, RefreshTokenRepository repository) {
         String rawRefreshToken = refreshTokenGenerator.generate();
         String tokenHash = refreshTokenHasher.hash(rawRefreshToken);
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
@@ -130,8 +130,10 @@ public class LoginUser {
                 null,
                 null
         ));
-        return rawRefreshToken;
+        return new IssuedSession(familyId, rawRefreshToken);
     }
+
+    private record IssuedSession(UUID familyId, String refreshToken) {}
 
     private static OffsetDateTime min(OffsetDateTime first, OffsetDateTime second) {
         return first.isBefore(second) ? first : second;

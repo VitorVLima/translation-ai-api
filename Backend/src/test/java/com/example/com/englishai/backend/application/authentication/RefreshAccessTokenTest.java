@@ -64,7 +64,7 @@ class RefreshAccessTokenTest {
         when(repository.findByTokenHashForUpdate("old-hash")).thenReturn(Optional.of(current));
         stubFamily(current);
         when(tokenGenerator.generate()).thenReturn("new-raw");
-        when(accessTokenGenerator.generate(userId)).thenReturn("new-access");
+        when(accessTokenGenerator.generate(userId, familyId)).thenReturn("new-access");
 
         RefreshAccessTokenResult result = useCase.execute("old-raw");
 
@@ -80,7 +80,7 @@ class RefreshAccessTokenTest {
         assertThat(replacement.getFamilyId()).isEqualTo(familyId);
         assertThat(replacement.getUserId()).isEqualTo(userId);
         assertThat(replacement.getTokenHash()).isEqualTo("new-hash");
-        verify(accessTokenGenerator).generate(userId);
+        verify(accessTokenGenerator).generate(userId, familyId);
         verify(transaction).execute(any());
         InOrder order = inOrder(repository, familyRepository);
         order.verify(repository).findByTokenHash("old-hash");
@@ -96,7 +96,7 @@ class RefreshAccessTokenTest {
         when(repository.findByTokenHashForUpdate("old-hash")).thenReturn(Optional.of(current));
         stubFamily(current);
         when(tokenGenerator.generate()).thenReturn("new-raw");
-        when(accessTokenGenerator.generate(current.getUserId())).thenReturn("access");
+        when(accessTokenGenerator.generate(current.getUserId(), current.getFamilyId())).thenReturn("access");
 
         useCase.execute("old-raw");
 
@@ -199,14 +199,14 @@ class RefreshAccessTokenTest {
         when(repository.findByTokenHashForUpdate("old-hash")).thenReturn(Optional.of(current));
         stubFamily(current);
         when(tokenGenerator.generate()).thenReturn("new");
-        when(accessTokenGenerator.generate(userId)).thenReturn("access");
+        when(accessTokenGenerator.generate(userId, familyId)).thenReturn("access");
 
         useCase.execute("old");
 
         ArgumentCaptor<RefreshToken> replacement = ArgumentCaptor.forClass(RefreshToken.class);
         verify(repository).persistRotation(any(), replacement.capture());
         assertThat(replacement.getValue().getFamilyId()).isEqualTo(familyId);
-        verify(accessTokenGenerator).generate(userId);
+        verify(accessTokenGenerator).generate(userId, familyId);
     }
 
     @Test
@@ -222,7 +222,7 @@ class RefreshAccessTokenTest {
         when(repository.findByTokenHashForUpdate("old-hash")).thenReturn(Optional.of(current));
         when(familyRepository.findByIdForUpdate(familyId)).thenReturn(Optional.of(family));
         when(tokenGenerator.generate()).thenReturn("new");
-        when(accessTokenGenerator.generate(userId)).thenReturn("access");
+        when(accessTokenGenerator.generate(userId, familyId)).thenReturn("access");
 
         useCase.execute("old");
 

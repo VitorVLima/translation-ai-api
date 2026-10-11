@@ -3,6 +3,7 @@ package com.example.com.englishai.backend.infrastructure.security;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidAuthenticationTokenException;
 import com.example.com.englishai.backend.application.authentication.exception.InvalidAuthenticationTokenException.Reason;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.crypto.MACVerifier;
@@ -23,17 +24,19 @@ public class JwtTokenValidator implements AuthenticationTokenValidator {
     private final Duration clockSkew;
     private final String issuer;
     private final String audience;
+    private final RefreshTokenFamilyRepository families;
 
-    public JwtTokenValidator(String base64Secret, Clock clock) {
-        this(base64Secret, clock, Duration.ofSeconds(60), JwtDefaults.ISSUER, JwtDefaults.AUDIENCE);
-    }
-
-    public JwtTokenValidator(String base64Secret, Clock clock, Duration clockSkew) {
-        this(base64Secret, clock, clockSkew, JwtDefaults.ISSUER, JwtDefaults.AUDIENCE);
+    public JwtTokenValidator(String base64Secret, Clock clock, RefreshTokenFamilyRepository families) {
+        this(base64Secret, clock, Duration.ofSeconds(60), JwtDefaults.ISSUER, JwtDefaults.AUDIENCE, families);
     }
 
     public JwtTokenValidator(String base64Secret, Clock clock, Duration clockSkew,
-                             String issuer, String audience) {
+                             RefreshTokenFamilyRepository families) {
+        this(base64Secret, clock, clockSkew, JwtDefaults.ISSUER, JwtDefaults.AUDIENCE, families);
+    }
+
+    public JwtTokenValidator(String base64Secret, Clock clock, Duration clockSkew,
+                             String issuer, String audience, RefreshTokenFamilyRepository families) {
         byte[] key = JwtSecret.decode(base64Secret);
         try {
             this.verifier = new MACVerifier(key);
@@ -47,6 +50,7 @@ public class JwtTokenValidator implements AuthenticationTokenValidator {
         this.clockSkew = clockSkew;
         this.issuer = requireText(issuer, "JWT issuer");
         this.audience = requireText(audience, "JWT audience");
+        this.families = Objects.requireNonNull(families, "Session family repository is required");
     }
 
     @Override
@@ -92,6 +96,26 @@ public class JwtTokenValidator implements AuthenticationTokenValidator {
             UUID userId = UUID.fromString(subject);
             if (!userId.toString().equalsIgnoreCase(subject)) {
                 throw new InvalidAuthenticationTokenException(Reason.INVALID_SUBJECT);
+            }
+            String familyClaim = claims.getStringClaim("session_family");
+            if (familyClaim == null) {
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SESSION);
+            }
+            UUID familyId;
+            try {
+                familyId = UUID.fromString(familyClaim);
+            } catch (IllegalArgumentException exception) {
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SESSION);
+            }
+            if (!familyId.toString().equalsIgnoreCase(familyClaim)) {
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SESSION);
+            }
+            var family = families.findById(familyId)
+                    .orElseThrow(() -> new InvalidAuthenticationTokenException(Reason.INVALID_SESSION));
+            if (!userId.equals(family.getUserId()) || family.getRevokedAt() != null
+                    || family.getExpiresAt() == null
+                    || !family.getExpiresAt().toInstant().isAfter(clock.instant())) {
+                throw new InvalidAuthenticationTokenException(Reason.INVALID_SESSION);
             }
             return userId;
         } catch (InvalidAuthenticationTokenException exception) {

@@ -48,14 +48,16 @@ public class JwtTokenGenerator implements AuthenticationTokenGenerator {
     }
 
     @Override
-    public String generate(UUID userId) {
+    public String generate(UUID userId, UUID familyId) {
         Objects.requireNonNull(userId, "User ID is required");
+        Objects.requireNonNull(familyId, "Session family ID is required");
         Instant issuedAt = clock.instant().truncatedTo(ChronoUnit.SECONDS);
         JWTClaimsSet claims = new JWTClaimsSet.Builder()
                 .subject(userId.toString())
                 .issuer(issuer)
                 .audience(audience)
                 .claim("token_type", "access")
+                .claim("session_family", familyId.toString())
                 .issueTime(Date.from(issuedAt))
                 .expirationTime(Date.from(issuedAt.plus(expiration)))
                 .build();

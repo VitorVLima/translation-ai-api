@@ -1,6 +1,8 @@
 package com.example.com.englishai.backend.presentation.rest.user;
 
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
+import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamily;
 import com.example.com.englishai.backend.application.ports.UserRepository;
 import com.example.com.englishai.backend.application.user.usecase.GetCurrentUser;
 import com.example.com.englishai.backend.domain.user.User;
@@ -42,10 +44,12 @@ class UserControllerTest {
 
     private static final String SECRET = randomSecret();
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-09T12:00:00Z"), ZoneOffset.UTC);
+    private static final UUID FAMILY_ID = UUID.randomUUID();
     private final MockMvc mockMvc;
 
     @MockitoBean
     private UserRepository repository;
+    @MockitoBean private RefreshTokenFamilyRepository families;
 
     @Autowired
     UserControllerTest(MockMvc mockMvc) {
@@ -102,9 +106,9 @@ class UserControllerTest {
     void shouldRejectInvalidAuthenticationBeforeReadingDatabase(String scenario) throws Exception {
         String invalidToken = switch (scenario) {
             case "expired" -> new JwtTokenGenerator(SECRET, Duration.ofSeconds(1),
-                    Clock.offset(CLOCK, Duration.ofMinutes(-1))).generate(UUID.randomUUID());
+                    Clock.offset(CLOCK, Duration.ofMinutes(-1))).generate(UUID.randomUUID(), UUID.randomUUID());
             case "wrong-key" -> new JwtTokenGenerator(randomSecret(), Duration.ofMinutes(15), CLOCK)
-                    .generate(UUID.randomUUID());
+                    .generate(UUID.randomUUID(), UUID.randomUUID());
             default -> "not-a-jwt";
         };
 
@@ -131,14 +135,17 @@ class UserControllerTest {
     }
 
     private String token(UUID userId) {
-        return new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId);
+        when(families.findById(FAMILY_ID)).thenReturn(Optional.of(new RefreshTokenFamily(FAMILY_ID,
+                userId, OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(CLOCK.instant().plusSeconds(3600), ZoneOffset.UTC), null)));
+        return new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId, FAMILY_ID);
     }
 
     @TestConfiguration(proxyBeanMethods = false)
     static class TokenConfiguration {
         @Bean
-        AuthenticationTokenValidator tokenValidator() {
-            return new JwtTokenValidator(SECRET, CLOCK);
+        AuthenticationTokenValidator tokenValidator(RefreshTokenFamilyRepository families) {
+            return new JwtTokenValidator(SECRET, CLOCK, families);
         }
     }
 

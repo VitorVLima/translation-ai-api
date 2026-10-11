@@ -89,6 +89,21 @@ test('200/403/429 de request protegida retornam sem refresh; Bearer vem da sess�
   }
 });
 
+test('access token legado rejeitado com 401 é substituído via refresh sem expor credenciais', async () => {
+  const logs = [];
+  const h = harness(({ isRefresh, options }) => {
+    if (isRefresh) return json(pair);
+    return options.headers.get('Authorization') === `Bearer ${pair.accessToken}` ? status(200) : status(401);
+  }, { development: true, logs });
+  await h.login();
+
+  assert.equal((await h.request('/api/v1/users/me')).status, 200);
+  assert.equal(h.state.refreshes, 1);
+  assert.equal(h.state.token, pair.refreshToken);
+  assert.equal(h.session.getSession().accessToken, pair.accessToken);
+  assert.doesNotMatch(JSON.stringify(logs), /test-access-initial|test-access-next|test-refresh-initial|test-refresh-next/);
+});
+
 test('três 401 compartilham refresh e só repetem após persistir a rotação', async () => {
   const started = deferred();
   const finishRefresh = deferred();

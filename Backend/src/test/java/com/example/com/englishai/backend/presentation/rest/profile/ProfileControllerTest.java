@@ -2,6 +2,8 @@ package com.example.com.englishai.backend.presentation.rest.profile;
 
 import com.example.com.englishai.backend.application.admin.CatalogService;
 import com.example.com.englishai.backend.application.ports.AuthenticationTokenValidator;
+import com.example.com.englishai.backend.application.ports.RefreshTokenFamilyRepository;
+import com.example.com.englishai.backend.domain.authentication.RefreshTokenFamily;
 import com.example.com.englishai.backend.application.profile.AvatarType;
 import com.example.com.englishai.backend.application.profile.EnglishLevel;
 import com.example.com.englishai.backend.application.profile.OnboardingStatus;
@@ -31,6 +33,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.eq;
@@ -49,6 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProfileControllerTest {
     private static final String SECRET = randomSecret();
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-09T12:00:00Z"), ZoneOffset.UTC);
+    private static final UUID FAMILY_ID = UUID.randomUUID();
 
     @Autowired
     private MockMvc mockMvc;
@@ -57,6 +61,7 @@ class ProfileControllerTest {
     private ProfileService service;
     @MockitoBean
     private CatalogService catalog;
+    @MockitoBean private RefreshTokenFamilyRepository families;
 
     @Test
     void readsTheAuthenticatedUsersPendingProfile() throws Exception {
@@ -182,14 +187,17 @@ class ProfileControllerTest {
     }
 
     private String token(UUID userId) {
-        return new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId);
+        when(families.findById(FAMILY_ID)).thenReturn(Optional.of(new RefreshTokenFamily(FAMILY_ID,
+                userId, OffsetDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(CLOCK.instant().plusSeconds(3600), ZoneOffset.UTC), null)));
+        return new JwtTokenGenerator(SECRET, Duration.ofMinutes(15), CLOCK).generate(userId, FAMILY_ID);
     }
 
     @TestConfiguration(proxyBeanMethods = false)
     static class TokenConfiguration {
         @Bean
-        AuthenticationTokenValidator tokenValidator() {
-            return new JwtTokenValidator(SECRET, CLOCK);
+        AuthenticationTokenValidator tokenValidator(RefreshTokenFamilyRepository families) {
+            return new JwtTokenValidator(SECRET, CLOCK, families);
         }
     }
 

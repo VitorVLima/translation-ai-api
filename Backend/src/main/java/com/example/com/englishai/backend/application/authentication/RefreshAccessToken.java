@@ -139,7 +139,7 @@ public class RefreshAccessToken {
         );
 
         repository.persistRotation(rotatedCurrent, replacement);
-        String accessToken = authenticationTokenGenerator.generate(current.getUserId());
+        String accessToken = authenticationTokenGenerator.generate(current.getUserId(), current.getFamilyId());
         return RotationOutcome.rotated(new RefreshAccessTokenResult(accessToken, newRawToken));
     }
 

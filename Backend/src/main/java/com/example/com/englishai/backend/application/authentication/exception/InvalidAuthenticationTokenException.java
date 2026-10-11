@@ -12,7 +12,8 @@ public class InvalidAuthenticationTokenException extends RuntimeException {
         INVALID_AUDIENCE,
         EXPIRED,
         INVALID_IAT,
-        INVALID_SUBJECT
+        INVALID_SUBJECT,
+        INVALID_SESSION
     }
 
     private final Reason reason;

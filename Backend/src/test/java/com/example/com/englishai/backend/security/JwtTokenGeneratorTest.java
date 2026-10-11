@@ -29,11 +29,12 @@ class JwtTokenGeneratorTest {
     private final Clock clock = Clock.fixed(now, ZoneOffset.UTC);
 
     @Test
-    void shouldGenerateSignedTokenWithOnlyUserIdAndTimestamps() throws Exception {
+    void shouldGenerateSignedSessionBoundToken() throws Exception {
         UUID userId = UUID.randomUUID();
+        UUID familyId = UUID.randomUUID();
         JwtTokenGenerator generator = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock);
 
-        SignedJWT token = SignedJWT.parse(generator.generate(userId));
+        SignedJWT token = SignedJWT.parse(generator.generate(userId, familyId));
 
         assertThat(token.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.HS256);
         assertThat(token.getHeader().getType()).isEqualTo(JOSEObjectType.JWT);
@@ -42,16 +43,17 @@ class JwtTokenGeneratorTest {
         assertThat(token.getJWTClaimsSet().getIssueTime().toInstant()).isEqualTo(now);
         assertThat(token.getJWTClaimsSet().getExpirationTime().toInstant()).isEqualTo(now.plusSeconds(900));
         assertThat(token.getJWTClaimsSet().getStringClaim("token_type")).isEqualTo("access");
+        assertThat(token.getJWTClaimsSet().getStringClaim("session_family")).isEqualTo(familyId.toString());
         assertThat(token.getJWTClaimsSet().getIssuer()).isEqualTo("englishai");
         assertThat(token.getJWTClaimsSet().getAudience()).containsExactly("englishai-api");
-        assertThat(token.getJWTClaimsSet().getClaims()).containsOnlyKeys("sub", "iss", "aud", "token_type", "iat", "exp");
+        assertThat(token.getJWTClaimsSet().getClaims()).containsOnlyKeys("sub", "iss", "aud", "token_type", "session_family", "iat", "exp");
     }
 
     @Test
     void shouldUseConfiguredExpiration() throws Exception {
         JwtTokenGenerator generator = new JwtTokenGenerator(secret, Duration.ofSeconds(60), clock);
 
-        SignedJWT token = SignedJWT.parse(generator.generate(UUID.randomUUID()));
+        SignedJWT token = SignedJWT.parse(generator.generate(UUID.randomUUID(), UUID.randomUUID()));
 
         assertThat(token.getJWTClaimsSet().getExpirationTime().toInstant()).isEqualTo(now.plusSeconds(60));
     }
@@ -60,7 +62,7 @@ class JwtTokenGeneratorTest {
     void shouldNotVerifyWithAnotherKey() throws Exception {
         JwtTokenGenerator generator = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock);
 
-        SignedJWT token = SignedJWT.parse(generator.generate(UUID.randomUUID()));
+        SignedJWT token = SignedJWT.parse(generator.generate(UUID.randomUUID(), UUID.randomUUID()));
 
         assertThat(token.verify(new MACVerifier(randomKey()))).isFalse();
     }
@@ -85,9 +87,17 @@ class JwtTokenGeneratorTest {
     void shouldRejectMissingUserId() {
         JwtTokenGenerator generator = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock);
 
-        assertThatThrownBy(() -> generator.generate(null))
+        assertThatThrownBy(() -> generator.generate(null, UUID.randomUUID()))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("User ID is required");
+    }
+
+    @Test
+    void shouldRejectMissingFamilyId() {
+        JwtTokenGenerator generator = new JwtTokenGenerator(secret, Duration.ofMinutes(15), clock);
+        assertThatThrownBy(() -> generator.generate(UUID.randomUUID(), null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("Session family ID is required");
     }
 
     private static byte[] randomKey() {
