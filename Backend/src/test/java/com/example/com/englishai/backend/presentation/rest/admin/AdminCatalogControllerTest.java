@@ -7,6 +7,10 @@ import com.example.com.englishai.backend.infrastructure.persistence.entity.Prede
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.util.Base64;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -63,6 +67,27 @@ class AdminCatalogControllerTest {
         verify(service).saveAvatar(null, "avatar_07", "Leo", "generated.png", true, 0);
     }
 
+    @Test void jpegAndWebpUploadsAreDecodedAndStoredInSupportedNormalizedFormats() throws Exception {
+        CatalogService service = mock(CatalogService.class);
+        ProfileImageStorage runtime = mock(ProfileImageStorage.class);
+        when(runtime.store(any(byte[].class), eq("image/jpeg"))).thenReturn("generated.jpg");
+        when(runtime.store(any(byte[].class), eq("image/png"))).thenReturn("generated-webp.png");
+        when(service.saveAvatar(eq(null), eq("avatar_08"), eq("Ana"), eq("generated.jpg"), eq(true), eq(0)))
+                .thenReturn(avatar(UUID.randomUUID(), "avatar_08", "generated.jpg", AvatarAssetSource.RUNTIME));
+        when(service.saveAvatar(eq(null), eq("avatar_09"), eq("Bia"), eq("generated-webp.png"), eq(true), eq(0)))
+                .thenReturn(avatar(UUID.randomUUID(), "avatar_09", "generated-webp.png", AvatarAssetSource.RUNTIME));
+        var controller = new AdminCatalogController(service, runtime);
+        var jpeg = new MockMultipartFile("file", "photo.jpg", "image/jpeg", encodedImage("jpeg"));
+        var webp = new MockMultipartFile("file", "photo.webp", "image/webp", Base64.getDecoder().decode(
+                "UklGRjoAAABXRUJQVlA4IC4AAACQAQCdASoCAAIAAUAmJaACdLoAA5gA/vW4f/wG6+LaZf/gTv/gTv/AAAAA"));
+
+        controller.uploadAvatar("avatar_08", "Ana", true, 0, jpeg);
+        controller.uploadAvatar("avatar_09", "Bia", true, 0, webp);
+
+        verify(runtime).store(any(byte[].class), eq("image/jpeg"));
+        verify(runtime).store(any(byte[].class), eq("image/png"));
+    }
+
     @Test void rejectsInvalidSignatureAndOversizedUploadBeforeStorage() {
         CatalogService service = mock(CatalogService.class);
         ProfileImageStorage runtime = mock(ProfileImageStorage.class);
@@ -110,6 +135,18 @@ class AdminCatalogControllerTest {
     }
 
     private static MockMultipartFile pngFile() {
-        return new MockMultipartFile("file", "avatar.png", "image/png", new byte[]{(byte) 137, 80, 78, 71, 0, 0, 0, 0, 0});
+        try {
+            var output = new ByteArrayOutputStream();
+            ImageIO.write(new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", output);
+            return new MockMultipartFile("file", "avatar.png", "image/png", output.toByteArray());
+        } catch (java.io.IOException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    private static byte[] encodedImage(String format) throws Exception {
+        var output = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(2, 2, format.equals("jpeg") ? BufferedImage.TYPE_INT_RGB : BufferedImage.TYPE_INT_ARGB), format, output);
+        return output.toByteArray();
     }
 }

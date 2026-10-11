@@ -53,11 +53,8 @@ public class AdminCatalogController {
             throw new IllegalArgumentException("Invalid avatar image");
         }
         try {
-            byte[] bytes = file.getBytes();
-            if (!signature(type, bytes)) {
-                throw new IllegalArgumentException("Invalid avatar image");
-            }
-            String asset = storage.store(bytes, type);
+            var image = AdminAvatarImageValidator.validate(file.getBytes(), type);
+            String asset = storage.store(image.bytes(), image.contentType());
             try {
                 return ResponseEntity.status(201).body(Avatar.from(s.saveAvatar(
                         null, key, displayName, asset, enabled, sortOrder)));
@@ -88,13 +85,10 @@ public class AdminCatalogController {
             throw new IllegalArgumentException("Invalid avatar image");
         }
         try {
-            byte[] bytes = file.getBytes();
-            if (!signature(type, bytes)) {
-                throw new IllegalArgumentException("Invalid avatar image");
-            }
+            var image = AdminAvatarImageValidator.validate(file.getBytes(), type);
             var old = s.allAvatars().stream().filter(a -> a.getId().equals(id)).findFirst().orElseThrow();
             String oldAsset = old.getAssetKey();
-            String asset = storage.store(bytes, type);
+            String asset = storage.store(image.bytes(), image.contentType());
             try {
                 var updated = s.saveAvatar(
                         id,
@@ -180,14 +174,6 @@ public class AdminCatalogController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void disableScenario(@PathVariable UUID id) {
         s.disableScenario(id);
-    }
-
-    private static boolean signature(String t, byte[] b) {
-        return (t.equals("image/jpeg") && b.length > 3 && (b[0] & 255) == 255 && (b[1] & 255) == 216)
-                || (t.equals("image/png") && b.length > 8 && b[0] == (byte) 137 && b[1] == 80 && b[2] == 78
-                && b[3] == 71)
-                || (t.equals("image/webp") && b.length > 12 && b[0] == 'R' && b[1] == 'I' && b[2] == 'F'
-                && b[3] == 'F' && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P');
     }
 
     public record AvatarRequest(
